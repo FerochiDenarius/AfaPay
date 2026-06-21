@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'screens/registration_screen.dart';
+import 'core/router/app_router.dart';
 
 void main() {
-  runApp(const AfaPayApp());
+  runApp(const ProviderScope(child: AfaPayApp()));
 }
 
 class AfaPayApp extends StatelessWidget {
@@ -11,7 +12,7 @@ class AfaPayApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return MaterialApp.router(
       title: 'AfaPay',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
@@ -39,7 +40,7 @@ class AfaPayApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const RegistrationScreen(),
+      routerConfig: appRouter,
     );
   }
 }

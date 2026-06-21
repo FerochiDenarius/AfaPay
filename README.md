@@ -1,16 +1,37 @@
-# afa_pay
+# AfaPay
 
-A new Flutter project.
+AfaPay is a Flutter fintech application currently under UI and frontend-logic
+development. Backend services will be connected later through the existing
+repository and service boundaries.
 
-## Getting Started
+## Current Stack
 
-This project is a starting point for a Flutter application.
+- Flutter and Dart
+- Provider for registration form state
+- Riverpod for phone verification state
+- GoRouter for application navigation
+- Android and iOS targets
 
-A few resources to get you started if this is your first Flutter project:
+## Implemented UI
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+- Login screen
+- Multi-field registration screen
+- Optional phone OTP verification screen
+- Required PIN setup screen placeholder
+- Required email entry and OTP verification screens
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Email verification will be required when implemented. OCR onboarding will be
+optional.
+
+## Verification
+
+```sh
+flutter analyze
+flutter test
+```
+
+See [docs/UI_WORK_LOG.md](docs/UI_WORK_LOG.md) for implementation details and
+the ongoing UI development history.
+
+Backend configuration and deployment requirements are documented in
+[docs/BACKEND_SETUP.md](docs/BACKEND_SETUP.md).

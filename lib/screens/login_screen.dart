@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-
-import 'registration_screen.dart';
+import 'package:go_router/go_router.dart';
 
 const _gold = Color(0xFFF2A900);
 const _muted = Color(0xFFA9ABB2);
@@ -232,9 +231,7 @@ class _LoginForm extends StatelessWidget {
             ),
             GestureDetector(
               onTap: () {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => const RegistrationScreen()),
-                );
+                context.go('/register');
               },
               child: const Text(
                 'Sign Up',
