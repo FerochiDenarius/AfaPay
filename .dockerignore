@@ -1,0 +1,16 @@
+.git
+.dart_tool
+build
+android
+ios
+linux
+macos
+web
+windows
+UIdesignImages
+test
+*.log
+**/.env
+**/.env.*
+!**/.env.example
+AfaPayBackend/node_modules

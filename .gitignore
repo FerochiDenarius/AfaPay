@@ -57,3 +57,5 @@ app.*.map.json
 *.key
 *credentials*.json
 service-account*.json
+node_modules/
+**/node_modules/
