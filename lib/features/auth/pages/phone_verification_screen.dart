@@ -14,10 +14,12 @@ class PhoneVerificationScreen extends ConsumerStatefulWidget {
     super.key,
     required this.userId,
     required this.phoneNumber,
+    this.email = '',
   });
 
   final String userId;
   final String phoneNumber;
+  final String email;
 
   @override
   ConsumerState<PhoneVerificationScreen> createState() =>
@@ -45,7 +47,7 @@ class _PhoneVerificationScreenState
     if (response.success && response.verified) {
       context.go(
         '/pin-setup',
-        extra: <String, String>{'userId': widget.userId},
+        extra: <String, String>{'userId': widget.userId, 'email': widget.email},
       );
       return;
     }
@@ -119,6 +121,7 @@ class _PhoneVerificationScreenState
                                 '/pin-setup',
                                 extra: <String, String>{
                                   'userId': widget.userId,
+                                  'email': widget.email,
                                 },
                               ),
                               child: const Text(

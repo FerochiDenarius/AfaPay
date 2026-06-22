@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/config/api_config.dart';
+
 const _gold = Color(0xFFF5B81F);
 
 class PinSetupScreen extends StatefulWidget {
-  const PinSetupScreen({super.key, required this.userId});
+  const PinSetupScreen({super.key, required this.userId, this.email = ''});
 
   final String userId;
+  final String email;
 
   @override
   State<PinSetupScreen> createState() => _PinSetupScreenState();
@@ -88,12 +91,19 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
                       height: 60,
                       child: FilledButton(
                         onPressed: _pin.length == 4
-                            ? () => context.go(
-                                '/email-verification',
-                                extra: <String, String>{
-                                  'userId': widget.userId,
-                                },
-                              )
+                            ? () {
+                                if (!ApiConfig.requireEmailVerification) {
+                                  context.go('/dashboard');
+                                  return;
+                                }
+                                context.go(
+                                  '/email-verification',
+                                  extra: <String, String>{
+                                    'userId': widget.userId,
+                                    'email': widget.email,
+                                  },
+                                );
+                              }
                             : null,
                         style: FilledButton.styleFrom(
                           backgroundColor: _gold,

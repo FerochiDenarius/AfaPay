@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/auth/services/auth_service.dart';
+
 const _gold = Color(0xFFF2A900);
 const _muted = Color(0xFFA9ABB2);
 const _field = Color(0xFF0B111D);
@@ -14,6 +16,35 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
+  bool _isLoading = false;
+  String _identifier = '';
+  String _password = '';
+
+  Future<void> _login() async {
+    if (_identifier.trim().isEmpty || _password.isEmpty || _isLoading) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() => _isLoading = true);
+    try {
+      final result = await AuthService().login(
+        identifier: _identifier,
+        password: _password,
+      );
+      if (!mounted) return;
+      if (result.success) context.go('/dashboard');
+    } on AuthException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to login. Please try again.')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,6 +71,15 @@ class _LoginScreenState extends State<LoginScreen> {
                       padding: const EdgeInsets.symmetric(horizontal: 28),
                       child: _LoginForm(
                         obscurePassword: _obscurePassword,
+                        isLoading: _isLoading,
+                        canLogin:
+                            _identifier.trim().isNotEmpty &&
+                            _password.isNotEmpty,
+                        onIdentifierChanged: (value) =>
+                            setState(() => _identifier = value),
+                        onPasswordChanged: (value) =>
+                            setState(() => _password = value),
+                        onLogin: _login,
                         onTogglePassword: () => setState(
                           () => _obscurePassword = !_obscurePassword,
                         ),
@@ -110,10 +150,20 @@ class _LoginForm extends StatelessWidget {
   const _LoginForm({
     required this.obscurePassword,
     required this.onTogglePassword,
+    required this.isLoading,
+    required this.canLogin,
+    required this.onIdentifierChanged,
+    required this.onPasswordChanged,
+    required this.onLogin,
   });
 
   final bool obscurePassword;
   final VoidCallback onTogglePassword;
+  final bool isLoading;
+  final bool canLogin;
+  final ValueChanged<String> onIdentifierChanged;
+  final ValueChanged<String> onPasswordChanged;
+  final VoidCallback onLogin;
 
   @override
   Widget build(BuildContext context) {
@@ -134,10 +184,13 @@ class _LoginForm extends StatelessWidget {
         const SizedBox(height: 28),
         const _FieldLabel('Email or Phone Number'),
         const SizedBox(height: 8),
-        const TextField(
+        TextField(
           keyboardType: TextInputType.emailAddress,
-          style: TextStyle(fontSize: 17),
-          decoration: InputDecoration(
+          textInputAction: TextInputAction.next,
+          autofillHints: const [AutofillHints.username, AutofillHints.email],
+          onChanged: onIdentifierChanged,
+          style: const TextStyle(fontSize: 17),
+          decoration: const InputDecoration(
             hintText: 'Enter email or phone number',
             prefixIcon: Icon(Icons.person_outline_rounded),
           ),
@@ -147,6 +200,12 @@ class _LoginForm extends StatelessWidget {
         const SizedBox(height: 8),
         TextField(
           obscureText: obscurePassword,
+          textInputAction: TextInputAction.done,
+          autofillHints: const [AutofillHints.password],
+          onChanged: onPasswordChanged,
+          onSubmitted: (_) {
+            if (canLogin) onLogin();
+          },
           style: const TextStyle(fontSize: 17),
           decoration: InputDecoration(
             hintText: 'Enter your password',
@@ -177,7 +236,7 @@ class _LoginForm extends StatelessWidget {
         SizedBox(
           height: 58,
           child: FilledButton(
-            onPressed: () {},
+            onPressed: canLogin && !isLoading ? onLogin : null,
             style: FilledButton.styleFrom(
               backgroundColor: _gold,
               foregroundColor: Colors.black,
@@ -185,10 +244,19 @@ class _LoginForm extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            child: const Text(
-              'Login',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
-            ),
+            child: isLoading
+                ? const SizedBox(
+                    width: 25,
+                    height: 25,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.6,
+                      color: Colors.black,
+                    ),
+                  )
+                : const Text(
+                    'Login',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                  ),
           ),
         ),
         const SizedBox(height: 28),

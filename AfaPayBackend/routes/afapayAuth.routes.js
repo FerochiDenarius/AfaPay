@@ -1,10 +1,11 @@
 const crypto = require('crypto');
 const express = require('express');
 const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 
-const User = require('../models/user.model');
+const User = require('../models/afapayUser.model');
 
 const router = express.Router();
 
@@ -18,6 +19,7 @@ const normalizeText = (value, max = 255) =>
 const hashCode = (code) =>
   crypto.createHash('sha256').update(String(code)).digest('hex');
 const isEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+const phoneOtpEnabled = () => process.env.PHONE_OTP_ENABLED === 'true';
 
 function smtpConfigured() {
   return Boolean(
@@ -89,6 +91,8 @@ router.post('/register', async (req, res) => {
     return res.status(201).json({
       success: true,
       verificationRequired: true,
+      phoneVerificationRequired: phoneOtpEnabled(),
+      nextStep: phoneOtpEnabled() ? 'verify_phone' : 'pin_setup',
       userId: user._id.toString(),
     });
   } catch (error) {
@@ -102,6 +106,80 @@ router.post('/register', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Registration could not be completed.',
+    });
+  }
+});
+
+router.post('/login', async (req, res) => {
+  try {
+    const identifier = normalizeText(req.body.identifier).toLowerCase();
+    const password = String(req.body.password || '');
+    if (!identifier || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email, phone number, or username and password are required.',
+      });
+    }
+    if (!process.env.ACCESS_TOKEN_SECRET || !process.env.REFRESH_TOKEN_SECRET) {
+      return res.status(503).json({
+        success: false,
+        message: 'Authentication is not configured on the server.',
+      });
+    }
+
+    const user = await User.findOne({
+      $or: [
+        { email: identifier },
+        { phoneNumber: normalizeText(req.body.identifier, 30) },
+        { username: identifier },
+      ],
+    });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid credentials.',
+      });
+    }
+
+    const payload = {
+      sub: user._id.toString(),
+      userId: user._id.toString(),
+      username: user.username,
+    };
+    const accessToken = jwt.sign(payload, process.env.ACCESS_TOKEN_SECRET, {
+      expiresIn: '15m',
+      issuer: 'afapay',
+      audience: 'afapay-mobile',
+    });
+    const refreshToken = jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET, {
+      expiresIn: '30d',
+      issuer: 'afapay',
+      audience: 'afapay-mobile',
+    });
+    user.refreshToken = hashCode(refreshToken);
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      accessToken,
+      refreshToken,
+      user: {
+        id: user._id.toString(),
+        firstName: user.firstName || '',
+        lastName: user.lastName || '',
+        username: user.username,
+        email: user.email || '',
+        phoneNumber: user.phoneNumber || '',
+        emailVerified: Boolean(user.emailVerified),
+        phoneVerified: Boolean(user.phoneVerified),
+      },
+    });
+  } catch (error) {
+    console.error('[AfaPay] login failed:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Login could not be completed.',
     });
   }
 });

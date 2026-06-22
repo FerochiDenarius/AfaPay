@@ -2,11 +2,13 @@
   "name": "afapay-backend",
   "version": "1.0.0",
   "private": true,
-  "description": "AfaPay onboarding API using the shared Yenkasa user model",
+  "description": "AfaPay onboarding API for registration, verification, and login",
   "main": "afapay.server.js",
   "scripts": {
+    "dev": "node afapay.server.js",
+    "tunnel": "ngrok http 8080",
     "start": "node afapay.server.js",
-    "check": "node --check afapay.server.js && node --check routes/afapayAuth.routes.js",
+    "check": "node --check afapay.server.js && node --check routes/afapayAuth.routes.js && node --check routes/afapayDashboard.routes.js",
     "test": "node --test"
   },
   "engines": {
@@ -18,7 +20,9 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.16.0",
-    "nodemailer": "^9.0.1"
+    "nodemailer": "^9.0.1",
+    "resend": "^6.14.0"
   }
 }

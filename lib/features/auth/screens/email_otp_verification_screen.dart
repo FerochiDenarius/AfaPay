@@ -44,7 +44,7 @@ class _EmailOtpVerificationScreenState
         .verify(userId: widget.userId, email: widget.email);
     if (!mounted) return;
     if (response.success && response.verified) {
-      context.go('/onboarding-complete');
+      context.go('/dashboard');
       return;
     }
     ScaffoldMessenger.of(

@@ -56,11 +56,22 @@ class _RegistrationViewState extends State<_RegistrationView> {
       final result = await registration.register();
       if (!mounted) return;
       if (result.success && result.verificationRequired) {
-        context.push(
-          '/verify-phone',
+        if (result.nextStep == 'verify_phone') {
+          context.push(
+            '/verify-phone',
+            extra: <String, String>{
+              'userId': result.userId,
+              'phoneNumber': registration.formattedPhoneNumber,
+              'email': registration.email.trim().toLowerCase(),
+            },
+          );
+          return;
+        }
+        context.go(
+          '/pin-setup',
           extra: <String, String>{
             'userId': result.userId,
-            'phoneNumber': registration.formattedPhoneNumber,
+            'email': registration.email.trim().toLowerCase(),
           },
         );
       }
