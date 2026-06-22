@@ -21,6 +21,8 @@ POST /api/afapay/auth/send-email-verification
 POST /api/afapay/auth/verify-email
 POST /api/afapay/auth/verify-phone          (501 until SMS is configured)
 POST /api/afapay/auth/resend-phone-otp      (501 until SMS is configured)
+POST /api/auth/send-email-verification      (alias)
+POST /api/auth/verify-email                 (alias)
 GET  /api/user/profile                     (JWT required)
 GET  /api/wallet/balance                   (JWT required)
 GET  /api/transactions/recent              (JWT required)
@@ -32,8 +34,8 @@ Mongoose model stored in the `afapay_users` collection. This keeps new AfaPay
 accounts separate from the copied Yenkasa `users` collection while the backend
 is being refactored.
 
-Email verification codes are cryptographically random, stored only as SHA-256
-hashes, expire after three minutes by default, enforce a 60-second resend
+Email verification uses Resend's HTTP API. Codes are cryptographically random,
+stored only as SHA-256 hashes, expire after ten minutes by default, enforce a 60-second resend
 cooldown, and allow no more than five verification attempts. Phone OTP remains
 optional until an SMS provider is wired; with `PHONE_OTP_ENABLED=false`,
 registration returns `nextStep: "pin_setup"` so the app does not claim a phone
@@ -54,8 +56,8 @@ values for:
 - `ACCESS_TOKEN_SECRET`
 - `REFRESH_TOKEN_SECRET`
 - `PHONE_OTP_ENABLED=false` until SMS is configured
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`
-- `EMAIL_USER`, `EMAIL_PASS`, `EMAIL_FROM`
+- `RESEND_API_KEY`
+- `EMAIL_FROM="AfaPay <noreply@afapay.xyz>"`
 - `CORS_ORIGIN=https://afapay.xyz,https://www.afapay.xyz`
 
 Do not commit the real `.env` file.
@@ -72,18 +74,25 @@ secret values in Railway environment variables, then attach the custom domain
 
 ## Flutter Configuration
 
-UI/device testing uses the frontend mock repository by default:
+Flutter now points to the hosted Railway backend by default:
 
 ```sh
 flutter run
 ```
 
-Connect to the hosted backend with:
+This uses:
+
+```text
+API_BASE_URL=https://afapay.xyz
+USE_MOCK_AUTH=false
+```
+
+Use local or ngrok testing only when you explicitly override the base URL:
 
 ```sh
 flutter run \
   --dart-define=USE_MOCK_AUTH=false \
-  --dart-define=API_BASE_URL=https://afapay.xyz
+  --dart-define=API_BASE_URL=https://abc123.ngrok-free.app
 ```
 
 `API_BASE_URL` must be HTTPS for production Android and iOS builds.

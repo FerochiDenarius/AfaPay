@@ -48,16 +48,19 @@ class AuthService {
     http.Client? client,
     String? baseUrl,
     AuthTokenStorage? tokenStorage,
+    bool? useMockAuth,
   }) : _client = client ?? http.Client(),
        _baseUrl = (baseUrl ?? ApiConfig.baseUrl).replaceAll(RegExp(r'/+$'), ''),
-       _tokenStorage = tokenStorage ?? AuthTokenStorage();
+       _tokenStorage = tokenStorage ?? AuthTokenStorage(),
+       _useMockAuth = useMockAuth ?? ApiConfig.useMockAuth;
 
   final http.Client _client;
   final String _baseUrl;
   final AuthTokenStorage _tokenStorage;
+  final bool _useMockAuth;
 
   Future<RegisterResult> register(RegisterRequest request) async {
-    if (ApiConfig.useMockAuth) {
+    if (_useMockAuth) {
       await Future<void>.delayed(const Duration(milliseconds: 900));
       return const RegisterResult(
         success: true,
@@ -97,7 +100,7 @@ class AuthService {
     required String identifier,
     required String password,
   }) async {
-    if (ApiConfig.useMockAuth) {
+    if (_useMockAuth) {
       await Future<void>.delayed(const Duration(milliseconds: 700));
       await _tokenStorage.saveTokens(
         const AuthTokens(

@@ -3,13 +3,12 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
-const nodemailer = require('nodemailer');
 
 const User = require('../models/afapayUser.model');
 
 const router = express.Router();
 
-const CODE_LIFETIME_SECONDS = Number(process.env.EMAIL_CODE_LIFETIME || 180);
+const CODE_LIFETIME_SECONDS = Number(process.env.EMAIL_CODE_LIFETIME || 600);
 const RESEND_COOLDOWN_SECONDS = Number(process.env.EMAIL_RESEND_COOLDOWN || 60);
 const MAX_VERIFY_ATTEMPTS = 5;
 
@@ -21,25 +20,37 @@ const hashCode = (code) =>
 const isEmail = (value) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 const phoneOtpEnabled = () => process.env.PHONE_OTP_ENABLED === 'true';
 
-function smtpConfigured() {
-  return Boolean(
-    process.env.SMTP_HOST &&
-      process.env.SMTP_PORT &&
-      process.env.EMAIL_USER &&
-      process.env.EMAIL_PASS,
-  );
+function resendConfigured() {
+  return Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM);
 }
 
-function createTransporter() {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS,
+async function sendEmailVerificationCode({ to, code }) {
+  const expiresInMinutes = Math.ceil(CODE_LIFETIME_SECONDS / 60);
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({
+      from: process.env.EMAIL_FROM,
+      to,
+      subject: 'Your AfaPay verification code',
+      text: `Your AfaPay verification code is ${code}. It expires in ${expiresInMinutes} minutes.`,
+      html: `<p>Your AfaPay verification code is:</p><h2>${code}</h2><p>It expires in ${expiresInMinutes} minutes.</p>`,
+    }),
   });
+
+  if (!response.ok) {
+    let message = 'Resend email delivery failed.';
+    try {
+      const body = await response.json();
+      message = body?.message || body?.error || message;
+    } catch (_) {
+      // Keep the generic delivery failure.
+    }
+    throw new Error(message);
+  }
 }
 
 router.post('/register', async (req, res) => {
@@ -194,7 +205,7 @@ router.post('/send-email-verification', async (req, res) => {
         message: 'A valid user and email address are required.',
       });
     }
-    if (!smtpConfigured()) {
+    if (!resendConfigured()) {
       return res.status(503).json({
         success: false,
         message: 'Email delivery is not configured on the server.',
@@ -245,15 +256,7 @@ router.post('/send-email-verification', async (req, res) => {
     user.emailVerificationAttempts = 0;
     await user.save();
 
-    await createTransporter().sendMail({
-      from:
-        process.env.EMAIL_FROM ||
-        `"AfaPay" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: 'Your AfaPay verification code',
-      text: `Your AfaPay verification code is ${code}. It expires in ${Math.ceil(CODE_LIFETIME_SECONDS / 60)} minutes.`,
-      html: `<p>Your AfaPay verification code is:</p><h2>${code}</h2><p>It expires in ${Math.ceil(CODE_LIFETIME_SECONDS / 60)} minutes.</p>`,
-    });
+    await sendEmailVerificationCode({ to: email, code });
 
     return res.status(200).json({
       success: true,
@@ -327,6 +330,7 @@ router.post('/verify-email', async (req, res) => {
     }
 
     user.emailVerified = true;
+    user.accountStatus = 'active';
     user.emailVerificationCode = undefined;
     user.emailVerificationExpires = undefined;
     user.emailVerificationCooldown = undefined;

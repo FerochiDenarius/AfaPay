@@ -1,5 +1,6 @@
 import 'package:afa_pay/features/auth/models/country.dart';
 import 'package:afa_pay/features/auth/providers/registration_provider.dart';
+import 'package:afa_pay/features/auth/services/auth_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -60,16 +61,17 @@ void main() {
     });
 
     test('simulated frontend registration requires verification', () async {
-      final registration = RegistrationProvider()
-        ..setFirstName('Ama')
-        ..setLastName('Mensah')
-        ..setUsername('ama_mensah')
-        ..setPhoneNumber('0241234567')
-        ..setEmail('ama@example.com')
-        ..setPassword('Strong1!')
-        ..setConfirmPassword('Strong1!')
-        ..setAcceptedTerms(true)
-        ..setAcceptedPrivacy(true);
+      final registration =
+          RegistrationProvider(authService: AuthService(useMockAuth: true))
+            ..setFirstName('Ama')
+            ..setLastName('Mensah')
+            ..setUsername('ama_mensah')
+            ..setPhoneNumber('0241234567')
+            ..setEmail('ama@example.com')
+            ..setPassword('Strong1!')
+            ..setConfirmPassword('Strong1!')
+            ..setAcceptedTerms(true)
+            ..setAcceptedPrivacy(true);
 
       final result = await registration.register();
 

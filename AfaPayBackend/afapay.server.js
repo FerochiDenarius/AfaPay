@@ -41,6 +41,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/afapay/auth', afapayAuthRoutes);
+app.use('/api/auth', afapayAuthRoutes);
 app.use('/api', afapayDashboardRoutes);
 
 app.use((req, res) => {

@@ -5,12 +5,12 @@ class ApiConfig {
 
   static const baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:8080',
+    defaultValue: productionBaseUrl,
   );
 
   static const useMockAuth = bool.fromEnvironment(
     'USE_MOCK_AUTH',
-    defaultValue: true,
+    defaultValue: false,
   );
 
   static const requireEmailVerification = bool.fromEnvironment(
