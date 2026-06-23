@@ -397,7 +397,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<void> _clearChat() async {
     final confirmed = await _confirmAction(
       title: 'Clear Chat',
-      message: 'Clear visible messages from this device?',
+      message: 'Clear visible messages for you only?',
       confirmLabel: 'Clear',
     );
     if (confirmed != true) return;
@@ -405,7 +405,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final settings = await _repository.clearChat(widget.roomId);
       if (!mounted) return;
       setState(() => _settings = settings);
-      _showInfo('Chat cleared.');
+      _showInfo('Chat cleared for you.');
     } on ChatAuthExpiredException {
       if (mounted) context.go('/login');
     } on ChatApiException catch (error) {

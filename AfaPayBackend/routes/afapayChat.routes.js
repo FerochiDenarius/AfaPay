@@ -130,6 +130,25 @@ async function getOrCreateRoomSetting(roomId, userId) {
   );
 }
 
+function messageVisibleForSetting(message, setting, now = Date.now()) {
+  if (!setting) return true;
+  const createdAt = message.timestamp || message.createdAt;
+  const createdTime = createdAt ? new Date(createdAt).getTime() : null;
+  if (!createdTime || Number.isNaN(createdTime)) return true;
+
+  const clearedBefore = setting.clearedBefore
+    ? new Date(setting.clearedBefore).getTime()
+    : null;
+  if (clearedBefore && createdTime <= clearedBefore) return false;
+
+  if (setting.disappearingSeconds) {
+    const disappearingCutoff = now - Number(setting.disappearingSeconds) * 1000;
+    if (createdTime <= disappearingCutoff) return false;
+  }
+
+  return true;
+}
+
 function hasBlocked(user, targetUserId) {
   const target = targetUserId?.toString();
   return Boolean(
@@ -427,8 +446,15 @@ router.get('/messages/:roomId', requireAfaPayAuth, async (req, res) => {
     .sort({ timestamp: 1, createdAt: 1 })
     .populate('repliedTo')
     .lean();
+  const setting = await ChatSetting.findOne({
+    roomId: room._id,
+    userId: req.afapayUser._id,
+  }).lean();
+  const visibleMessages = messages.filter((message) =>
+    messageVisibleForSetting(message, setting),
+  );
 
-  return res.json(await Promise.all(messages.map(messageForClient)));
+  return res.json(await Promise.all(visibleMessages.map(messageForClient)));
 });
 
 router.post('/messages', requireAfaPayAuth, async (req, res) => {
