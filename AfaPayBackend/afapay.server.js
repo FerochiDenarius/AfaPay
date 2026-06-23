@@ -6,7 +6,9 @@ const helmet = require('helmet');
 const mongoose = require('mongoose');
 
 const afapayAuthRoutes = require('./routes/afapayAuth.routes');
+const afapayChatRoutes = require('./routes/afapayChat.routes');
 const afapayDashboardRoutes = require('./routes/afapayDashboard.routes');
+const afapaySecurityRoutes = require('./routes/afapaySecurity.routes');
 
 const app = express();
 
@@ -26,7 +28,7 @@ app.use(
     origin: parseCorsOrigin(
       process.env.CORS_ORIGIN || 'https://afapay.xyz,https://www.afapay.xyz',
     ),
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   }),
 );
@@ -42,6 +44,8 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/afapay/auth', afapayAuthRoutes);
 app.use('/api/auth', afapayAuthRoutes);
+app.use('/api/security', afapaySecurityRoutes);
+app.use('/api', afapayChatRoutes);
 app.use('/api', afapayDashboardRoutes);
 
 app.use((req, res) => {

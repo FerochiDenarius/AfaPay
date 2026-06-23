@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/config/api_config.dart';
+import '../../security/repositories/security_repository.dart';
 
 const _gold = Color(0xFFF5B81F);
 
@@ -19,6 +19,8 @@ class PinSetupScreen extends StatefulWidget {
 class _PinSetupScreenState extends State<PinSetupScreen> {
   final _controller = TextEditingController();
   String _pin = '';
+  String? _firstPin;
+  bool _loading = false;
 
   @override
   void dispose() {
@@ -28,6 +30,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final isConfirming = _firstPin != null;
     return Scaffold(
       body: Container(
         width: double.infinity,
@@ -53,8 +56,8 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
                       size: 70,
                     ),
                     const SizedBox(height: 25),
-                    const Text(
-                      'Create Your PIN',
+                    Text(
+                      isConfirming ? 'Confirm Your PIN' : 'Create Your PIN',
                       style: TextStyle(
                         fontSize: 30,
                         fontWeight: FontWeight.w800,
@@ -62,7 +65,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
                     ),
                     const SizedBox(height: 10),
                     const Text(
-                      'A 4-digit PIN is required to secure transactions.',
+                      'A 4-6 digit PIN is required for app unlock and money actions.',
                       textAlign: TextAlign.center,
                       style: TextStyle(color: Color(0xFFA9ABB2), fontSize: 16),
                     ),
@@ -75,7 +78,7 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
                       keyboardType: TextInputType.number,
                       inputFormatters: [
                         FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(4),
+                        LengthLimitingTextInputFormatter(6),
                       ],
                       style: const TextStyle(
                         fontSize: 28,
@@ -83,40 +86,31 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
                         fontWeight: FontWeight.w800,
                       ),
                       onChanged: (value) => setState(() => _pin = value),
+                      onSubmitted: (_) => _continue(),
                       decoration: const InputDecoration(hintText: '••••'),
                     ),
                     const Spacer(flex: 2),
                     SizedBox(
-                      width: double.infinity,
-                      height: 60,
-                      child: FilledButton(
-                        onPressed: _pin.length == 4
-                            ? () {
-                                if (!ApiConfig.requireEmailVerification) {
-                                  context.go('/dashboard');
-                                  return;
-                                }
-                                context.go(
-                                  '/email-verification',
-                                  extra: <String, String>{
-                                    'userId': widget.userId,
-                                    'email': widget.email,
-                                  },
-                                );
-                              }
+                        width: double.infinity,
+                        height: 60,
+                        child: FilledButton(
+                        onPressed: _pin.length >= 4 && !_loading
+                            ? _continue
                             : null,
                         style: FilledButton.styleFrom(
                           backgroundColor: _gold,
                           foregroundColor: Colors.black,
                           disabledBackgroundColor: const Color(0xFF5B4C24),
                         ),
-                        child: const Text(
-                          'Continue',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
+                        child: _loading
+                            ? const CircularProgressIndicator(color: Colors.black)
+                            : Text(
+                                isConfirming ? 'Save PIN' : 'Continue',
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
                       ),
                     ),
                   ],
@@ -127,5 +121,41 @@ class _PinSetupScreenState extends State<PinSetupScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _continue() async {
+    if (_pin.length < 4 || _loading) return;
+    if (_firstPin == null) {
+      setState(() {
+        _firstPin = _pin;
+        _pin = '';
+        _controller.clear();
+      });
+      return;
+    }
+    if (_pin != _firstPin) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('PINs do not match. Try again.')),
+      );
+      setState(() {
+        _firstPin = null;
+        _pin = '';
+        _controller.clear();
+      });
+      return;
+    }
+    setState(() => _loading = true);
+    try {
+      await SecurityRepository().setupPin(_pin);
+      if (!mounted) return;
+      context.go('/enable-biometrics');
+    } on SecurityException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 }

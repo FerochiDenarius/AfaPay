@@ -30,7 +30,9 @@ class _LoginScreenState extends State<LoginScreen> {
         password: _password,
       );
       if (!mounted) return;
-      if (result.success) context.go('/dashboard');
+      if (result.success) {
+        context.go(result.pinConfigured ? '/dashboard' : '/pin-setup');
+      }
     } on AuthException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(

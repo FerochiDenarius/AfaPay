@@ -27,7 +27,7 @@ Current local link status:
 ```text
 Workspace: Afapay's Projects
 Project: afapay
-Environment: production
+Environment: afapayVariables
 Linked service: None
 ```
 
@@ -61,29 +61,48 @@ CORS_ORIGIN=https://afapay.xyz,https://www.afapay.xyz
 
 The production `AfaPay` service builds correctly from the repository
 `Dockerfile`, installs dependencies with `npm ci --omit=dev`, and starts the
-Node entrypoint. The current deployment fails because MongoDB Atlas rejects
-Railway's outbound connection:
+Node entrypoint. Deployment `35308ae2-2af5-4d49-ad27-f607b85fed89` is live and
+successfully connected to MongoDB Atlas.
 
 ```text
-Could not connect to any servers in your MongoDB Atlas cluster.
-One common reason is that you're trying to access the database from an IP
-that isn't whitelisted.
+GET https://afapay.xyz/health
+HTTP 200
+{"status":"ok","service":"afapay","publicUrl":"https://afapay.xyz"}
 ```
 
-Until this is fixed, `https://afapay.xyz/health` returns Railway's fallback
-404 because Railway stops the unhealthy deployment.
+### Recovery and verification record (2026-06-22)
 
-Fix one of these ways:
+- An earlier deployment was submitted as
+  `c357cea6-df93-403c-8b0f-1e138f6036fc`. The image built and the container
+  started, but the deployment failed during MongoDB server selection.
+- Railway network traces showed successful DNS queries and TCP traffic to all
+  three Atlas nodes on port `27017`. This proves basic network reachability,
+  but it does not mean that Atlas has authorized the source IP.
+- A direct connection probe returned Atlas's IP access-list error.
+- The laptop's current public IP is `154.161.142.63`; the previously recorded
+  `154.161.151.26` address is no longer current. Dynamic ISP addresses must be
+  updated in Atlas when they change.
+- Atlas Network Access was updated with `154.161.142.63/32` for current local
+  testing and `0.0.0.0/0` for Railway's dynamic egress during testing.
+- A direct local connection then completed successfully, confirming Atlas
+  authorization before the final Railway deployment.
+- Final deployment `35308ae2-2af5-4d49-ad27-f607b85fed89` reached `SUCCESS`.
+  Its logs show `[AfaPay] API listening on port 8080`.
+- The public health endpoint returned HTTP 200, the login endpoint queried
+  Atlas and returned the expected `401 Invalid credentials` for a nonexistent
+  probe account, and the CORS preflight returned HTTP 204 for
+  `https://afapay.xyz`.
+- Final regression verification passed: backend tests `6/6` and Flutter tests
+  `21/21`.
 
-1. In MongoDB Atlas, open `Security > Network Access` and add
-   `0.0.0.0/0` temporarily for Railway testing. Railway free deployments do
-   not provide a stable outbound IP. Restrict this later if you move to a plan
-   with static egress.
-2. Or create a Railway Mongo database with `railway add --database mongo` and
-   switch `MONGODB_URI` to that database URL. This creates a new empty database,
-   so existing Atlas data will not be present unless migrated.
+## Atlas Network Access
 
-After the database is reachable, redeploy:
+`0.0.0.0/0` is temporary for Railway testing because the current Railway
+deployment does not have stable outbound IP addresses. Replace it with static
+egress addresses when the hosting plan supports them. Remove obsolete laptop
+addresses when the ISP changes the public IP.
+
+Redeploy with:
 
 ```sh
 railway up --detach --yes --service AfaPay --environment production

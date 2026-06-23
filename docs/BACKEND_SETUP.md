@@ -72,6 +72,10 @@ Railway should use the repository `Dockerfile`. Set the production database and
 secret values in Railway environment variables, then attach the custom domain
 `afapay.xyz` to the deployed service.
 
+Production deployment `35308ae2-2af5-4d49-ad27-f607b85fed89` was verified on
+2026-06-22. `https://afapay.xyz/health` returns HTTP 200, MongoDB-backed login
+requests reach Atlas, and CORS allows the production origin.
+
 ## Flutter Configuration
 
 Flutter now points to the hosted Railway backend by default:

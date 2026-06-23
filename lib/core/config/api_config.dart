@@ -20,6 +20,6 @@ class ApiConfig {
 
   static const initialRoute = String.fromEnvironment(
     'INITIAL_ROUTE',
-    defaultValue: '/register',
+    defaultValue: '/login',
   );
 }

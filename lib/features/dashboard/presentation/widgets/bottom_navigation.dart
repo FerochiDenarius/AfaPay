@@ -25,14 +25,14 @@ class AfaBottomNavigation extends StatelessWidget {
           label: 'Home',
         ),
         NavigationDestination(
-          icon: Icon(Icons.receipt_long_outlined),
-          selectedIcon: Icon(Icons.receipt_long_rounded),
-          label: 'Activity',
+          icon: Icon(Icons.chat_bubble_outline_rounded),
+          selectedIcon: Icon(Icons.chat_bubble_rounded),
+          label: 'Chats',
         ),
         NavigationDestination(
-          icon: Icon(Icons.qr_code_2_outlined),
-          selectedIcon: Icon(Icons.qr_code_2_rounded),
-          label: 'Pay',
+          icon: Icon(Icons.account_balance_wallet_outlined),
+          selectedIcon: Icon(Icons.account_balance_wallet_rounded),
+          label: 'Wallet',
         ),
         NavigationDestination(
           icon: Icon(Icons.contacts_outlined),
@@ -40,13 +40,13 @@ class AfaBottomNavigation extends StatelessWidget {
           label: 'Contacts',
         ),
         NavigationDestination(
-          icon: Icon(Icons.settings_outlined),
-          selectedIcon: Icon(Icons.settings_rounded),
-          label: 'Settings',
+          icon: Icon(Icons.person_outline_rounded),
+          selectedIcon: Icon(Icons.person_rounded),
+          label: 'Profile',
         ),
       ],
     );
   }
 }
 
-const _routes = ['/dashboard', '/activity', '/pay', '/contacts', '/settings'];
+const _routes = ['/dashboard', '/chats', '/wallet', '/contacts', '/profile'];

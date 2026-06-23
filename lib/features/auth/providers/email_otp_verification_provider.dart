@@ -6,6 +6,8 @@ import '../models/otp_verification_response.dart';
 import '../repositories/http_auth_repository.dart';
 import 'phone_verification_provider.dart';
 
+const emailVerificationResendSeconds = 90;
+
 final emailOtpVerificationProvider =
     NotifierProvider.autoDispose<
       EmailOtpVerificationNotifier,
@@ -15,7 +17,7 @@ final emailOtpVerificationProvider =
 class EmailOtpVerificationState {
   const EmailOtpVerificationState({
     this.otp = '',
-    this.secondsRemaining = 60,
+    this.secondsRemaining = emailVerificationResendSeconds,
     this.isVerifying = false,
     this.isResending = false,
     this.errorMessage,
@@ -114,7 +116,10 @@ class EmailOtpVerificationNotifier extends Notifier<EmailOtpVerificationState> {
       await ref
           .read(authRepositoryProvider)
           .resendEmailVerification(userId: userId, email: email);
-      state = state.copyWith(otp: '', secondsRemaining: 60);
+      state = state.copyWith(
+        otp: '',
+        secondsRemaining: emailVerificationResendSeconds,
+      );
       _startTimer();
       return true;
     } catch (error) {

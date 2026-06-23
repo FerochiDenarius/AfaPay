@@ -1,15 +1,24 @@
 const crypto = require('crypto');
 const express = require('express');
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
 const User = require('../models/afapayUser.model');
+const BiometricSetting = require('../models/afapayBiometricSetting.model');
+const LoginHistory = require('../models/afapayLoginHistory.model');
+const PinCredential = require('../models/afapayPinCredential.model');
+const RefreshToken = require('../models/afapayRefreshToken.model');
+const SecurityAuditLog = require('../models/afapaySecurityAuditLog.model');
+const UserDevice = require('../models/afapayUserDevice.model');
+const { hashSecret, verifySecret } = require('../services/securityHash.service');
 
 const router = express.Router();
 
-const CODE_LIFETIME_SECONDS = Number(process.env.EMAIL_CODE_LIFETIME || 600);
-const RESEND_COOLDOWN_SECONDS = Number(process.env.EMAIL_RESEND_COOLDOWN || 60);
+const CODE_LIFETIME_SECONDS = Number(process.env.EMAIL_CODE_LIFETIME || 900);
+const RESEND_COOLDOWN_SECONDS = Number(process.env.EMAIL_RESEND_COOLDOWN || 90);
+const ACCESS_TOKEN_LIFETIME = process.env.ACCESS_TOKEN_LIFETIME || '15m';
+const REFRESH_TOKEN_LIFETIME = process.env.REFRESH_TOKEN_LIFETIME || '60d';
+const REFRESH_TOKEN_DAYS = Number(process.env.REFRESH_TOKEN_DAYS || 60);
 const MAX_VERIFY_ATTEMPTS = 5;
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
@@ -22,6 +31,115 @@ const phoneOtpEnabled = () => process.env.PHONE_OTP_ENABLED === 'true';
 
 function resendConfigured() {
   return Boolean(process.env.RESEND_API_KEY && process.env.EMAIL_FROM);
+}
+
+function userTokenPayload(user) {
+  return {
+    sub: user._id.toString(),
+    userId: user._id.toString(),
+    username: user.username,
+  };
+}
+
+function issueTokens(user, deviceId = '') {
+  const payload = userTokenPayload(user);
+  return {
+    accessToken: jwt.sign({ ...payload, deviceId, jti: crypto.randomUUID() }, process.env.ACCESS_TOKEN_SECRET, {
+      expiresIn: ACCESS_TOKEN_LIFETIME,
+      issuer: 'afapay',
+      audience: 'afapay-mobile',
+    }),
+    refreshToken: jwt.sign({ ...payload, deviceId, jti: crypto.randomUUID() }, process.env.REFRESH_TOKEN_SECRET, {
+      expiresIn: REFRESH_TOKEN_LIFETIME,
+      issuer: 'afapay',
+      audience: 'afapay-mobile',
+    }),
+  };
+}
+
+function clientIp(req) {
+  return (
+    req.headers['x-forwarded-for']?.toString().split(',')[0].trim() ||
+    req.socket?.remoteAddress ||
+    ''
+  );
+}
+
+function requestDevice(req) {
+  const bodyDevice = req.body?.device && typeof req.body.device === 'object' ? req.body.device : {};
+  return {
+    deviceId: normalizeText(
+      req.body?.deviceId || bodyDevice.deviceId || req.headers['x-device-id'] || crypto.randomUUID(),
+      128,
+    ),
+    deviceName: normalizeText(req.body?.deviceName || bodyDevice.deviceName, 160),
+    platform: normalizeText(req.body?.platform || bodyDevice.platform, 40),
+    osVersion: normalizeText(req.body?.osVersion || bodyDevice.osVersion, 80),
+    pushNotificationToken: normalizeText(
+      req.body?.pushNotificationToken || bodyDevice.pushNotificationToken,
+      512,
+    ),
+  };
+}
+
+async function audit({ userId = null, eventType, status = 'success', req, deviceId = '', metadata = {} }) {
+  try {
+    await SecurityAuditLog.create({
+      userId,
+      eventType,
+      status,
+      ipAddress: req ? clientIp(req) : '',
+      deviceId,
+      metadata,
+    });
+  } catch (error) {
+    console.warn('[AfaPay] audit log failed:', error.message);
+  }
+}
+
+async function registerDevice({ user, req, device }) {
+  return UserDevice.findOneAndUpdate(
+    { userId: user._id, deviceId: device.deviceId },
+    {
+      $set: {
+        deviceName: device.deviceName,
+        platform: device.platform,
+        osVersion: device.osVersion,
+        pushNotificationToken: device.pushNotificationToken,
+        lastLogin: new Date(),
+        lastIp: clientIp(req),
+        revoked: false,
+      },
+      $setOnInsert: {
+        userId: user._id,
+        deviceId: device.deviceId,
+      },
+    },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+}
+
+async function storeRefreshToken({ user, deviceId, refreshToken }) {
+  const expiresAt = new Date(Date.now() + REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000);
+  await RefreshToken.create({
+    userId: user._id,
+    deviceId,
+    tokenHash: hashCode(refreshToken),
+    expiresAt,
+    revoked: false,
+  });
+  return expiresAt;
+}
+
+async function userSecurityStatus(userId) {
+  const [pin, biometric] = await Promise.all([
+    PinCredential.findOne({ userId }).lean(),
+    BiometricSetting.findOne({ userId }).lean(),
+  ]);
+  return {
+    pinConfigured: Boolean(pin),
+    biometricEnabled: Boolean(biometric?.biometricEnabled),
+  };
 }
 
 async function sendEmailVerificationCode({ to, code }) {
@@ -96,7 +214,7 @@ router.post('/register', async (req, res) => {
       location: country,
       phoneNumber,
       email,
-      password: await bcrypt.hash(password, 12),
+      password: await hashSecret(password),
     });
 
     return res.status(201).json({
@@ -145,36 +263,58 @@ router.post('/login', async (req, res) => {
         { username: identifier },
       ],
     });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user || !(await verifySecret(user.password, password))) {
+      await LoginHistory.create({
+        userId: user?._id || new mongoose.Types.ObjectId(),
+        ipAddress: clientIp(req),
+        deviceId: normalizeText(req.body?.deviceId || req.body?.device?.deviceId, 128),
+        status: 'failed',
+        reason: 'invalid_credentials',
+      }).catch(() => {});
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials.',
       });
     }
 
-    const payload = {
-      sub: user._id.toString(),
-      userId: user._id.toString(),
-      username: user.username,
-    };
-    const accessToken = jwt.sign(payload, process.env.ACCESS_TOKEN_SECRET, {
-      expiresIn: '15m',
-      issuer: 'afapay',
-      audience: 'afapay-mobile',
-    });
-    const refreshToken = jwt.sign(payload, process.env.REFRESH_TOKEN_SECRET, {
-      expiresIn: '30d',
-      issuer: 'afapay',
-      audience: 'afapay-mobile',
+    const device = requestDevice(req);
+    await registerDevice({ user, req, device });
+    await RefreshToken.updateMany(
+      { userId: user._id, deviceId: device.deviceId, revoked: false },
+      { $set: { revoked: true, revokedAt: new Date() } },
+    );
+    const { accessToken, refreshToken } = issueTokens(user, device.deviceId);
+    const refreshTokenExpiresAt = await storeRefreshToken({
+      user,
+      deviceId: device.deviceId,
+      refreshToken,
     });
     user.refreshToken = hashCode(refreshToken);
     user.lastLoginAt = new Date();
+    user.lastLoginIp = clientIp(req);
+    user.lastLoginUserAgent = normalizeText(req.headers['user-agent'], 255);
     await user.save();
+    await LoginHistory.create({
+      userId: user._id,
+      ipAddress: clientIp(req),
+      deviceId: device.deviceId,
+      status: 'success',
+    }).catch(() => {});
+    await audit({
+      userId: user._id,
+      eventType: 'login',
+      req,
+      deviceId: device.deviceId,
+    });
+    const security = await userSecurityStatus(user._id);
 
     return res.status(200).json({
       success: true,
       accessToken,
       refreshToken,
+      deviceId: device.deviceId,
+      refreshTokenExpiresAt,
+      ...security,
       user: {
         id: user._id.toString(),
         firstName: user.firstName || '',
@@ -191,6 +331,80 @@ router.post('/login', async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Login could not be completed.',
+    });
+  }
+});
+
+router.post('/refresh', async (req, res) => {
+  try {
+    const refreshToken = String(req.body.refreshToken || '').trim();
+    if (!refreshToken) {
+      return res.status(400).json({
+        success: false,
+        message: 'Refresh token is required.',
+      });
+    }
+    if (!process.env.ACCESS_TOKEN_SECRET || !process.env.REFRESH_TOKEN_SECRET) {
+      return res.status(503).json({
+        success: false,
+        message: 'Authentication is not configured on the server.',
+      });
+    }
+
+    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET, {
+      issuer: 'afapay',
+      audience: 'afapay-mobile',
+    });
+    const user = await User.findById(decoded.userId || decoded.sub);
+    const tokenHash = hashCode(refreshToken);
+    const suppliedDeviceId = normalizeText(req.body.deviceId || decoded.deviceId, 128);
+    const storedToken = await RefreshToken.findOne({
+      userId: decoded.userId || decoded.sub,
+      tokenHash,
+      revoked: false,
+      expiresAt: { $gt: new Date() },
+      ...(suppliedDeviceId ? { deviceId: suppliedDeviceId } : {}),
+    });
+    if (!user || (!storedToken && user.refreshToken !== tokenHash)) {
+      return res.status(401).json({
+        success: false,
+        message: 'Session expired. Please log in again.',
+      });
+    }
+
+    const deviceId = storedToken?.deviceId || suppliedDeviceId || decoded.deviceId || '';
+    if (storedToken) {
+      storedToken.revoked = true;
+      storedToken.revokedAt = new Date();
+      await storedToken.save();
+    }
+    const tokens = issueTokens(user, deviceId);
+    await storeRefreshToken({ user, deviceId, refreshToken: tokens.refreshToken });
+    user.refreshToken = hashCode(tokens.refreshToken);
+    await user.save();
+    if (deviceId) {
+      await UserDevice.updateOne(
+        { userId: user._id, deviceId, revoked: false },
+        { $set: { lastLogin: new Date(), lastIp: clientIp(req) } },
+      );
+    }
+    await audit({
+      userId: user._id,
+      eventType: 'refresh_token_rotate',
+      req,
+      deviceId,
+    });
+
+    return res.status(200).json({
+      success: true,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      deviceId,
+    });
+  } catch (_) {
+    return res.status(401).json({
+      success: false,
+      message: 'Session expired. Please log in again.',
     });
   }
 });

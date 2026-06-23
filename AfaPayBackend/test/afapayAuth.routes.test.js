@@ -6,13 +6,35 @@ const bcrypt = require('bcryptjs');
 const express = require('express');
 const jwt = require('jsonwebtoken');
 
+const BiometricSetting = require('../models/afapayBiometricSetting.model');
+const LoginHistory = require('../models/afapayLoginHistory.model');
+const PinCredential = require('../models/afapayPinCredential.model');
+const RefreshToken = require('../models/afapayRefreshToken.model');
+const SecurityAuditLog = require('../models/afapaySecurityAuditLog.model');
 const User = require('../models/afapayUser.model');
+const UserDevice = require('../models/afapayUserDevice.model');
 const afapayAuthRoutes = require('../routes/afapayAuth.routes');
+const { verifySecret } = require('../services/securityHash.service');
 
 const originalUserMethods = {
   create: User.create,
   findById: User.findById,
   findOne: User.findOne,
+};
+const originalUserDeviceMethods = {
+  findOneAndUpdate: UserDevice.findOneAndUpdate,
+  updateOne: UserDevice.updateOne,
+};
+const originalRefreshTokenMethods = {
+  create: RefreshToken.create,
+  findOne: RefreshToken.findOne,
+  updateMany: RefreshToken.updateMany,
+};
+const originalSecurityMethods = {
+  biometricFindOne: BiometricSetting.findOne,
+  loginHistoryCreate: LoginHistory.create,
+  pinFindOne: PinCredential.findOne,
+  auditCreate: SecurityAuditLog.create,
 };
 const originalFetch = globalThis.fetch;
 
@@ -63,6 +85,15 @@ test.afterEach(() => {
   User.create = originalUserMethods.create;
   User.findById = originalUserMethods.findById;
   User.findOne = originalUserMethods.findOne;
+  UserDevice.findOneAndUpdate = originalUserDeviceMethods.findOneAndUpdate;
+  UserDevice.updateOne = originalUserDeviceMethods.updateOne;
+  RefreshToken.create = originalRefreshTokenMethods.create;
+  RefreshToken.findOne = originalRefreshTokenMethods.findOne;
+  RefreshToken.updateMany = originalRefreshTokenMethods.updateMany;
+  BiometricSetting.findOne = originalSecurityMethods.biometricFindOne;
+  LoginHistory.create = originalSecurityMethods.loginHistoryCreate;
+  PinCredential.findOne = originalSecurityMethods.pinFindOne;
+  SecurityAuditLog.create = originalSecurityMethods.auditCreate;
   globalThis.fetch = originalFetch;
 });
 
@@ -104,13 +135,14 @@ test('register creates an AfaPay user with a hashed password', async () => {
     assert.equal(createdUser.username, 'amapay');
     assert.equal(createdUser.country, 'Ghana');
     assert.notEqual(createdUser.password, 'StrongPass1!');
-    assert.equal(await bcrypt.compare('StrongPass1!', createdUser.password), true);
+    assert.equal(await verifySecret(createdUser.password, 'StrongPass1!'), true);
   });
 });
 
 test('login returns signed access and refresh tokens for a valid user', async () => {
   const passwordHash = await bcrypt.hash('StrongPass1!', 4);
   let savedUser;
+  let createdRefreshToken;
 
   User.findOne = async () => ({
     _id: {
@@ -128,6 +160,20 @@ test('login returns signed access and refresh tokens for a valid user', async ()
       savedUser = this;
     },
   });
+  UserDevice.findOneAndUpdate = async () => ({});
+  RefreshToken.updateMany = async () => ({ modifiedCount: 0 });
+  RefreshToken.create = async (doc) => {
+    createdRefreshToken = doc;
+    return doc;
+  };
+  PinCredential.findOne = () => ({
+    lean: async () => null,
+  });
+  BiometricSetting.findOne = () => ({
+    lean: async () => null,
+  });
+  LoginHistory.create = async () => ({});
+  SecurityAuditLog.create = async () => ({});
 
   await withServer(createApp(), async (baseUrl) => {
     const response = await postJson(baseUrl, '/api/afapay/auth/login', {
@@ -141,8 +187,14 @@ test('login returns signed access and refresh tokens for a valid user', async ()
     assert.equal(response.body.user.username, 'amapay');
     assert.match(response.body.accessToken, /^[\w-]+\.[\w-]+\.[\w-]+$/);
     assert.match(response.body.refreshToken, /^[\w-]+\.[\w-]+\.[\w-]+$/);
+    assert.equal(response.body.pinConfigured, false);
+    assert.equal(response.body.biometricEnabled, false);
+    assert.ok(response.body.deviceId);
     assert.match(savedUser.refreshToken, /^[a-f0-9]{64}$/);
     assert.ok(savedUser.lastLoginAt instanceof Date);
+    assert.equal(createdRefreshToken.deviceId, response.body.deviceId);
+    assert.match(createdRefreshToken.tokenHash, /^[a-f0-9]{64}$/);
+    assert.ok(createdRefreshToken.expiresAt instanceof Date);
 
     const decoded = jwt.verify(
       response.body.accessToken,
@@ -154,6 +206,86 @@ test('login returns signed access and refresh tokens for a valid user', async ()
     );
     assert.equal(decoded.userId, '507f1f77bcf86cd799439011');
     assert.equal(decoded.username, 'amapay');
+    assert.ok(decoded.exp - decoded.iat <= 15 * 60 + 5);
+  });
+});
+
+test('refresh rotates tokens for a valid stored refresh token', async () => {
+  let savedUser;
+  let storedRefreshTokenSaved = false;
+  let createdRefreshToken;
+  const user = {
+    _id: {
+      toString: () => '507f1f77bcf86cd799439011',
+    },
+    username: 'amapay',
+    refreshToken: '',
+    async save() {
+      savedUser = this;
+    },
+  };
+  const refreshToken = jwt.sign(
+    {
+      sub: '507f1f77bcf86cd799439011',
+      userId: '507f1f77bcf86cd799439011',
+      username: 'amapay',
+      deviceId: 'device-1',
+    },
+    process.env.REFRESH_TOKEN_SECRET,
+    {
+      expiresIn: '60d',
+      issuer: 'afapay',
+      audience: 'afapay-mobile',
+    },
+  );
+  user.refreshToken = require('node:crypto')
+    .createHash('sha256')
+    .update(refreshToken)
+    .digest('hex');
+  User.findById = async () => user;
+  RefreshToken.findOne = async () => ({
+    userId: '507f1f77bcf86cd799439011',
+    deviceId: 'device-1',
+    tokenHash: user.refreshToken,
+    revoked: false,
+    expiresAt: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000),
+    async save() {
+      storedRefreshTokenSaved = true;
+    },
+  });
+  RefreshToken.create = async (doc) => {
+    createdRefreshToken = doc;
+    return doc;
+  };
+  UserDevice.updateOne = async () => ({ modifiedCount: 1 });
+  SecurityAuditLog.create = async () => ({});
+
+  await withServer(createApp(), async (baseUrl) => {
+    const response = await postJson(baseUrl, '/api/afapay/auth/refresh', {
+      refreshToken,
+      deviceId: 'device-1',
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.success, true);
+    assert.match(response.body.accessToken, /^[\w-]+\.[\w-]+\.[\w-]+$/);
+    assert.match(response.body.refreshToken, /^[\w-]+\.[\w-]+\.[\w-]+$/);
+    assert.notEqual(response.body.refreshToken, refreshToken);
+    assert.match(savedUser.refreshToken, /^[a-f0-9]{64}$/);
+    assert.equal(response.body.deviceId, 'device-1');
+    assert.equal(storedRefreshTokenSaved, true);
+    assert.equal(createdRefreshToken.deviceId, 'device-1');
+
+    const decoded = jwt.verify(
+      response.body.refreshToken,
+      process.env.REFRESH_TOKEN_SECRET,
+      {
+        audience: 'afapay-mobile',
+        issuer: 'afapay',
+      },
+    );
+    assert.ok(decoded.exp - decoded.iat >= 55 * 24 * 60 * 60);
+    assert.ok(decoded.exp - decoded.iat <= 61 * 24 * 60 * 60);
   });
 });
 
@@ -203,7 +335,7 @@ test('send-email-verification stores hashed OTP and sends through Resend API', a
     assert.equal(response.status, 200);
     assert.equal(response.body.success, true);
     assert.equal(response.body.email, 'ama@example.com');
-    assert.equal(response.body.expiresInSeconds, 600);
+    assert.equal(response.body.expiresInSeconds, 900);
     assert.equal(savedUser.email, 'ama@example.com');
     assert.equal(savedUser.emailVerified, false);
     assert.match(savedUser.emailVerificationCode, /^[a-f0-9]{64}$/);
@@ -211,7 +343,7 @@ test('send-email-verification stores hashed OTP and sends through Resend API', a
     assert.equal(savedUser.emailVerificationAttempts, 0);
     assert.equal(
       Math.round((savedUser.emailVerificationExpires.getTime() - Date.now()) / 1000),
-      600,
+      900,
     );
     assert.equal(resendRequest.headers.Authorization, 'Bearer re_test_api_key');
     assert.equal(resendRequest.body.from, 'AfaPay <noreply@afapay.xyz>');

@@ -84,28 +84,42 @@ class DashboardGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: dashboardFeatures.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        mainAxisSpacing: 14,
-        crossAxisSpacing: 14,
-        childAspectRatio: 0.92,
-      ),
-      itemBuilder: (context, index) {
-        final feature = dashboardFeatures[index];
-        return _FeatureCard(feature: feature, onTap: () => onSelected(feature));
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 360;
+        return GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: dashboardFeatures.length,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 3,
+            mainAxisSpacing: isCompact ? 10 : 12,
+            crossAxisSpacing: isCompact ? 10 : 12,
+            childAspectRatio: isCompact ? 0.96 : 1.02,
+          ),
+          itemBuilder: (context, index) {
+            final feature = dashboardFeatures[index];
+            return _FeatureCard(
+              feature: feature,
+              isCompact: isCompact,
+              onTap: () => onSelected(feature),
+            );
+          },
+        );
       },
     );
   }
 }
 
 class _FeatureCard extends StatelessWidget {
-  const _FeatureCard({required this.feature, required this.onTap});
+  const _FeatureCard({
+    required this.feature,
+    required this.isCompact,
+    required this.onTap,
+  });
 
   final DashboardFeature feature;
+  final bool isCompact;
   final VoidCallback onTap;
 
   @override
@@ -129,21 +143,32 @@ class _FeatureCard extends StatelessWidget {
             ],
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
+            padding: EdgeInsets.symmetric(
+              horizontal: isCompact ? 6 : 8,
+              vertical: isCompact ? 8 : 10,
+            ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(feature.icon, color: _gold, size: 38),
-                const SizedBox(height: 12),
-                Text(
-                  feature.label,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w800,
-                    fontSize: 15.5,
-                    height: 1.12,
+                Flexible(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Icon(feature.icon, color: _gold, size: 34),
+                  ),
+                ),
+                SizedBox(height: isCompact ? 7 : 9),
+                Flexible(
+                  child: Text(
+                    feature.label,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    softWrap: true,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: isCompact ? 12.5 : 13.5,
+                      height: 1.08,
+                    ),
                   ),
                 ),
               ],

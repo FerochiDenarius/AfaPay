@@ -94,6 +94,12 @@ const afapayUserSchema = new Schema(
       default: 'pending',
       index: true,
     },
+    blockedUsers: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'AfaPayUser',
+      },
+    ],
   },
   {
     collection: 'afapay_users',

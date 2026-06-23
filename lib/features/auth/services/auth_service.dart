@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
@@ -26,12 +28,18 @@ class LoginResult {
     required this.accessToken,
     required this.refreshToken,
     required this.userId,
+    required this.deviceId,
+    required this.pinConfigured,
+    required this.biometricEnabled,
   });
 
   final bool success;
   final String accessToken;
   final String refreshToken;
   final String userId;
+  final String deviceId;
+  final bool pinConfigured;
+  final bool biometricEnabled;
 }
 
 class AuthException implements Exception {
@@ -113,8 +121,13 @@ class AuthService {
         accessToken: 'mock-access-token',
         refreshToken: 'mock-refresh-token',
         userId: 'uuid',
+        deviceId: 'mock-device',
+        pinConfigured: false,
+        biometricEnabled: false,
       );
     }
+
+    final deviceId = await _getOrCreateDeviceId();
 
     final response = await _client
         .post(
@@ -126,6 +139,10 @@ class AuthService {
           body: jsonEncode({
             'identifier': identifier.trim(),
             'password': password,
+            'deviceId': deviceId,
+            'deviceName': Platform.operatingSystem,
+            'platform': Platform.operatingSystem,
+            'osVersion': Platform.operatingSystemVersion,
           }),
         )
         .timeout(const Duration(seconds: 20));
@@ -143,6 +160,9 @@ class AuthService {
       accessToken: body['accessToken'] as String? ?? '',
       refreshToken: body['refreshToken'] as String? ?? '',
       userId: user['id'] as String? ?? '',
+      deviceId: body['deviceId'] as String? ?? deviceId,
+      pinConfigured: body['pinConfigured'] == true,
+      biometricEnabled: body['biometricEnabled'] == true,
     );
     await _tokenStorage.saveTokens(
       AuthTokens(
@@ -150,6 +170,16 @@ class AuthService {
         refreshToken: result.refreshToken,
       ),
     );
+    await _tokenStorage.saveDeviceId(result.deviceId);
     return result;
+  }
+
+  Future<String> _getOrCreateDeviceId() async {
+    final existing = await _tokenStorage.readDeviceId();
+    if (existing != null && existing.isNotEmpty) return existing;
+    final generated =
+        'afapay-${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
+    await _tokenStorage.saveDeviceId(generated);
+    return generated;
   }
 }

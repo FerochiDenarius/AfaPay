@@ -8,7 +8,14 @@ import '../../features/auth/pages/registration_page.dart';
 import '../../features/auth/screens/email_otp_verification_screen.dart';
 import '../../features/auth/screens/email_verification_entry_screen.dart';
 import '../../features/auth/screens/onboarding_complete_screen.dart';
+import '../../features/chat/models/chat_models.dart';
+import '../../features/chat/presentation/call_landing_screen.dart';
+import '../../features/chat/presentation/chat_list_screen.dart';
+import '../../features/chat/presentation/chat_room_screen.dart';
 import '../../features/dashboard/presentation/screens/main_activity_screen.dart';
+import '../../features/security/presentation/device_management_screen.dart';
+import '../../features/security/presentation/enable_biometrics_screen.dart';
+import '../../features/security/presentation/enter_pin_screen.dart';
 import '../../screens/login_screen.dart';
 
 final appRouter = GoRouter(
@@ -53,6 +60,21 @@ final appRouter = GoRouter(
       },
     ),
     GoRoute(
+      path: '/enable-biometrics',
+      name: 'enable-biometrics',
+      builder: (context, state) => const EnableBiometricsScreen(),
+    ),
+    GoRoute(
+      path: '/enter-pin',
+      name: 'enter-pin',
+      builder: (context, state) => const EnterPinScreen(),
+    ),
+    GoRoute(
+      path: '/devices',
+      name: 'devices',
+      builder: (context, state) => const DeviceManagementScreen(),
+    ),
+    GoRoute(
       path: '/email-verification',
       name: 'email-verification',
       builder: (context, state) {
@@ -79,6 +101,36 @@ final appRouter = GoRouter(
       name: 'onboarding-complete',
       builder: (context, state) => const OnboardingCompleteScreen(),
     ),
+    GoRoute(
+      path: '/chats',
+      name: 'chats',
+      builder: (context, state) => const ChatListScreen(),
+    ),
+    GoRoute(
+      path: '/group-chat',
+      name: 'group-chat',
+      builder: (context, state) => const ChatListScreen(initialTab: 1),
+    ),
+    GoRoute(
+      path: '/chat/:roomId',
+      name: 'chat-room',
+      builder: (context, state) => ChatRoomScreen(
+        roomId: state.pathParameters['roomId'] ?? '',
+        conversation: state.extra is ChatConversation
+            ? state.extra! as ChatConversation
+            : null,
+      ),
+    ),
+    GoRoute(
+      path: '/voice-call',
+      name: 'voice-call',
+      builder: (context, state) => const CallLandingScreen(isVideo: false),
+    ),
+    GoRoute(
+      path: '/video-call',
+      name: 'video-call',
+      builder: (context, state) => const CallLandingScreen(isVideo: true),
+    ),
     ..._placeholderRoutes,
   ],
 );
@@ -91,9 +143,6 @@ final _placeholderRoutes = <GoRoute>[
   _placeholderRoute('/transfer', 'Transfer'),
   _placeholderRoute('/cards', 'Cards'),
   _placeholderRoute('/savings', 'Savings'),
-  _placeholderRoute('/group-chat', 'Group Chat'),
-  _placeholderRoute('/voice-call', 'Voice Call'),
-  _placeholderRoute('/video-call', 'Video Call'),
   _placeholderRoute('/tv-subscription', 'TV Subscription'),
   _placeholderRoute('/loans', 'Loans'),
   _placeholderRoute('/insurance', 'Insurance'),
@@ -102,6 +151,7 @@ final _placeholderRoutes = <GoRoute>[
   _placeholderRoute('/pay', 'Pay'),
   _placeholderRoute('/contacts', 'Contacts'),
   _placeholderRoute('/settings', 'Settings'),
+  _placeholderRoute('/profile', 'Profile'),
   _placeholderRoute('/notifications', 'Notifications'),
 ];
 
