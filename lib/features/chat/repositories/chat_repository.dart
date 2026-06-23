@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../../../core/config/api_config.dart';
 import '../../../core/security/auth_token_storage.dart';
 import '../models/chat_models.dart';
+import '../models/chat_room_settings.dart';
 
 class ChatAuthExpiredException implements Exception {
   const ChatAuthExpiredException();
@@ -165,6 +166,41 @@ class ChatRepository {
 
   Future<void> markAsRead(String roomId) async {
     await _sendJson('/api/messages/$roomId/mark-as-read', const {});
+  }
+
+  Future<ChatRoomSettings> fetchRoomSettings(String roomId) async {
+    final json = await _getJson('/api/chatrooms/$roomId/settings');
+    final settings = json is Map<String, dynamic> ? json['settings'] : null;
+    if (settings is Map<String, dynamic>) {
+      return ChatRoomSettings.fromJson(settings);
+    }
+    return ChatRoomSettings.defaults;
+  }
+
+  Future<ChatRoomSettings> saveRoomSettings({
+    required String roomId,
+    required ChatRoomSettings settings,
+  }) async {
+    final json = await _sendJson(
+      '/api/chatrooms/$roomId/settings',
+      settings.toJson(),
+    );
+    final savedSettings = json is Map<String, dynamic>
+        ? json['settings']
+        : null;
+    if (savedSettings is Map<String, dynamic>) {
+      return ChatRoomSettings.fromJson(savedSettings);
+    }
+    return settings;
+  }
+
+  Future<ChatRoomSettings> clearChat(String roomId) async {
+    final json = await _sendJson('/api/chatrooms/$roomId/clear', const {});
+    final settings = json is Map<String, dynamic> ? json['settings'] : null;
+    if (settings is Map<String, dynamic>) {
+      return ChatRoomSettings.fromJson(settings);
+    }
+    return ChatRoomSettings.defaults.copyWith(clearedBefore: DateTime.now());
   }
 
   Future<void> blockContact(String userId) async {

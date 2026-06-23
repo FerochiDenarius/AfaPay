@@ -8,7 +8,7 @@
     "dev": "node afapay.server.js",
     "tunnel": "ngrok http 8080",
     "start": "node afapay.server.js",
-    "check": "node --check afapay.server.js && node --check routes/afapayAuth.routes.js && node --check routes/afapayDashboard.routes.js && node --check routes/afapayChat.routes.js && node --check routes/afapaySecurity.routes.js && node --check services/securityHash.service.js && node --check models/afapayChatRoom.model.js && node --check models/afapayMessage.model.js && node --check models/afapayUserReport.model.js && node --check models/afapayUserDevice.model.js && node --check models/afapayRefreshToken.model.js && node --check models/afapayPinCredential.model.js && node --check models/afapayBiometricSetting.model.js && node --check models/afapayLoginHistory.model.js && node --check models/afapayPinAttempt.model.js && node --check models/afapaySecurityAuditLog.model.js",
+    "check": "node --check afapay.server.js && node --check routes/afapayAuth.routes.js && node --check routes/afapayDashboard.routes.js && node --check routes/afapayChat.routes.js && node --check routes/afapaySecurity.routes.js && node --check services/securityHash.service.js && node --check models/afapayChatRoom.model.js && node --check models/afapayChatSetting.model.js && node --check models/afapayMessage.model.js && node --check models/afapayUserReport.model.js && node --check models/afapayUserDevice.model.js && node --check models/afapayRefreshToken.model.js && node --check models/afapayPinCredential.model.js && node --check models/afapayBiometricSetting.model.js && node --check models/afapayLoginHistory.model.js && node --check models/afapayPinAttempt.model.js && node --check models/afapaySecurityAuditLog.model.js",
     "test": "node --test"
   },
   "engines": {

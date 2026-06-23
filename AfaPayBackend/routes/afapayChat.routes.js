@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
 
 const ChatRoom = require('../models/afapayChatRoom.model');
+const ChatSetting = require('../models/afapayChatSetting.model');
 const Message = require('../models/afapayMessage.model');
 const User = require('../models/afapayUser.model');
 const UserReport = require('../models/afapayUserReport.model');
@@ -28,6 +29,54 @@ function publicUser(user) {
     isOnline: false,
     lastSeen: null,
   };
+}
+
+const VALID_THEMES = new Set(['gold', 'emerald', 'sky', 'rose']);
+const VALID_WALLPAPERS = new Set(['midnight', 'graphite', 'aurora', 'clean']);
+const VALID_DISAPPEARING_SECONDS = new Set([86400, 604800, 2592000]);
+
+function settingForClient(setting) {
+  return {
+    roomId: setting.roomId.toString(),
+    userId: setting.userId.toString(),
+    theme: setting.theme || 'gold',
+    wallpaper: setting.wallpaper || 'midnight',
+    muted: setting.muted === true,
+    disappearingSeconds: setting.disappearingSeconds || null,
+    clearedBefore: setting.clearedBefore || null,
+    updatedAt: setting.updatedAt,
+  };
+}
+
+function normalizeChatSettingPatch(body) {
+  const patch = {};
+  if (body.theme !== undefined) {
+    const theme = String(body.theme || '').trim();
+    if (VALID_THEMES.has(theme)) patch.theme = theme;
+  }
+  if (body.wallpaper !== undefined) {
+    const wallpaper = String(body.wallpaper || '').trim();
+    if (VALID_WALLPAPERS.has(wallpaper)) patch.wallpaper = wallpaper;
+  }
+  if (body.muted !== undefined) {
+    patch.muted = body.muted === true;
+  }
+  if (body.disappearingSeconds !== undefined) {
+    const seconds = Number(body.disappearingSeconds);
+    patch.disappearingSeconds = VALID_DISAPPEARING_SECONDS.has(seconds)
+      ? seconds
+      : null;
+  }
+  if (body.clearedBefore !== undefined) {
+    const clearedBefore = body.clearedBefore
+      ? new Date(String(body.clearedBefore))
+      : null;
+    patch.clearedBefore =
+      clearedBefore && !Number.isNaN(clearedBefore.getTime())
+        ? clearedBefore
+        : null;
+  }
+  return patch;
 }
 
 async function requireAfaPayAuth(req, res, next) {
@@ -71,6 +120,14 @@ async function requireAfaPayAuth(req, res, next) {
 async function ensureRoomParticipant(roomId, userId) {
   if (!mongoose.isValidObjectId(roomId)) return null;
   return ChatRoom.findOne({ _id: roomId, participants: userId });
+}
+
+async function getOrCreateRoomSetting(roomId, userId) {
+  return ChatSetting.findOneAndUpdate(
+    { roomId, userId },
+    { $setOnInsert: { roomId, userId } },
+    { new: true, upsert: true },
+  );
 }
 
 function hasBlocked(user, targetUserId) {
@@ -412,6 +469,46 @@ router.post('/messages/:roomId/mark-as-read', requireAfaPayAuth, async (req, res
   const room = await ensureRoomParticipant(req.params.roomId, req.afapayUser._id);
   if (!room) return res.status(403).json({ success: false, message: 'Not authorized for this room.' });
   return res.json({ success: true, message: 'Room marked as read.' });
+});
+
+router.get('/chatrooms/:roomId/settings', requireAfaPayAuth, async (req, res) => {
+  const room = await ensureRoomParticipant(req.params.roomId, req.afapayUser._id);
+  if (!room) return res.status(403).json({ success: false, message: 'Not authorized for this room.' });
+
+  const setting = await getOrCreateRoomSetting(room._id, req.afapayUser._id);
+  return res.json({ success: true, settings: settingForClient(setting) });
+});
+
+router.post('/chatrooms/:roomId/settings', requireAfaPayAuth, async (req, res) => {
+  const room = await ensureRoomParticipant(req.params.roomId, req.afapayUser._id);
+  if (!room) return res.status(403).json({ success: false, message: 'Not authorized for this room.' });
+
+  const patch = normalizeChatSettingPatch(req.body || {});
+  if (Object.keys(patch).length === 0) {
+    const setting = await getOrCreateRoomSetting(room._id, req.afapayUser._id);
+    return res.json({ success: true, settings: settingForClient(setting) });
+  }
+  const setting = await ChatSetting.findOneAndUpdate(
+    { roomId: room._id, userId: req.afapayUser._id },
+    { $set: patch, $setOnInsert: { roomId: room._id, userId: req.afapayUser._id } },
+    { new: true, upsert: true },
+  );
+  return res.json({ success: true, settings: settingForClient(setting) });
+});
+
+router.post('/chatrooms/:roomId/clear', requireAfaPayAuth, async (req, res) => {
+  const room = await ensureRoomParticipant(req.params.roomId, req.afapayUser._id);
+  if (!room) return res.status(403).json({ success: false, message: 'Not authorized for this room.' });
+
+  const setting = await ChatSetting.findOneAndUpdate(
+    { roomId: room._id, userId: req.afapayUser._id },
+    {
+      $set: { clearedBefore: new Date() },
+      $setOnInsert: { roomId: room._id, userId: req.afapayUser._id },
+    },
+    { new: true, upsert: true },
+  );
+  return res.json({ success: true, settings: settingForClient(setting) });
 });
 
 router.post('/users/:userId/block', requireAfaPayAuth, async (req, res) => {
