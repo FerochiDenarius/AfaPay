@@ -1,14 +1,36 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const mongoose = require('mongoose');
+const multer = require('multer');
 
 const ChatRoom = require('../models/afapayChatRoom.model');
 const ChatSetting = require('../models/afapayChatSetting.model');
 const Message = require('../models/afapayMessage.model');
 const User = require('../models/afapayUser.model');
 const UserReport = require('../models/afapayUserReport.model');
+const mediaStorage = require('../services/mediaStorage.service');
+const { logUploadAudit } = require('../utils/cloudinaryMedia');
 
 const router = express.Router();
+
+const chatMediaUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 60 * 1024 * 1024 },
+  fileFilter(_req, file, cb) {
+    const mimetype = file.mimetype || '';
+    const allowed =
+      mimetype.startsWith('image/') ||
+      mimetype.startsWith('video/') ||
+      mimetype.startsWith('audio/') ||
+      mimetype === 'application/pdf' ||
+      mimetype === 'text/plain' ||
+      mimetype === 'application/zip' ||
+      mimetype === 'application/msword' ||
+      mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+    cb(allowed ? null : new Error('Unsupported file type'), allowed);
+  },
+});
 
 function participantKeyFor(userA, userB) {
   return [userA.toString(), userB.toString()].sort().join(':');
@@ -19,16 +41,41 @@ function escapeRegExp(value) {
 }
 
 function publicUser(user) {
+  const isOnline = user.online === true || user.isOnline === true;
   return {
     _id: user._id.toString(),
     id: user._id.toString(),
     username: user.username || '',
     profileImage: '',
     avatar: '',
-    online: false,
-    isOnline: false,
-    lastSeen: null,
+    online: isOnline,
+    isOnline,
+    lastSeen: user.lastSeen || null,
   };
+}
+
+function resolveChatUploadType(file, requestedType = '') {
+  const type = String(requestedType || '').toLowerCase();
+  if (['image', 'video', 'audio', 'file'].includes(type)) return type;
+  if (file?.mimetype?.startsWith('image/')) return 'image';
+  if (file?.mimetype?.startsWith('video/')) return 'video';
+  if (file?.mimetype?.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
+function mediaMessageKeyFor(type) {
+  if (type === 'image') return 'imageUrl';
+  if (type === 'video') return 'videoUrl';
+  if (type === 'audio') return 'audioUrl';
+  return 'fileUrl';
+}
+
+function mediaPreview(message) {
+  if (message.imageUrl) return 'Photo';
+  if (message.videoUrl) return 'Video';
+  if (message.audioUrl) return 'Voice message';
+  if (message.fileUrl) return 'File';
+  return 'Media';
 }
 
 const VALID_THEMES = new Set(['gold', 'emerald', 'sky', 'rose']);
@@ -201,6 +248,14 @@ async function replyForClient(message) {
     senderId: senderId || '',
     sender: sender ? publicUser(sender) : null,
     text: replyMessage.text || '',
+    imageUrl: replyMessage.imageUrl || '',
+    videoUrl: replyMessage.videoUrl || '',
+    audioUrl: replyMessage.audioUrl || '',
+    fileUrl: replyMessage.fileUrl || '',
+    mediaType: replyMessage.mediaType || '',
+    mediaName: replyMessage.mediaName || '',
+    mediaMimeType: replyMessage.mediaMimeType || '',
+    mediaSizeBytes: replyMessage.mediaSizeBytes || 0,
     timestamp: replyMessage.timestamp || replyMessage.createdAt,
     createdAt: replyMessage.createdAt,
     status: replyMessage.status || 'sent',
@@ -219,6 +274,14 @@ async function messageForClient(message) {
     senderId: message.senderId.toString(),
     sender: sender ? publicUser(sender) : null,
     text: message.text || '',
+    imageUrl: message.imageUrl || '',
+    videoUrl: message.videoUrl || '',
+    audioUrl: message.audioUrl || '',
+    fileUrl: message.fileUrl || '',
+    mediaType: message.mediaType || '',
+    mediaName: message.mediaName || '',
+    mediaMimeType: message.mediaMimeType || '',
+    mediaSizeBytes: message.mediaSizeBytes || 0,
     repliedTo: await replyForClient(message.repliedTo),
     timestamp: message.timestamp || message.createdAt,
     createdAt: message.createdAt,
@@ -231,7 +294,7 @@ async function privateRoomForClient(room, userId) {
     .map((participant) => participant.toString())
     .find((participant) => participant !== userId.toString());
   const otherUser = otherId
-    ? await User.findById(otherId).select('username _id').lean()
+    ? await User.findById(otherId).select('username _id online lastSeen').lean()
     : null;
   const lastMessage = await Message.findOne({ roomId: room._id })
     .sort({ timestamp: -1, createdAt: -1 })
@@ -256,7 +319,7 @@ async function groupForClient(room) {
     .lean();
   const memberIds = room.groupMembers?.length ? room.groupMembers : room.participants;
   const members = memberIds?.length
-    ? await User.find({ _id: { $in: memberIds } }).select('username _id').lean()
+    ? await User.find({ _id: { $in: memberIds } }).select('username _id online lastSeen').lean()
     : [];
 
   return {
@@ -285,7 +348,7 @@ router.get('/users/search', requireAfaPayAuth, async (req, res) => {
     _id: { $ne: req.afapayUser._id },
     username: new RegExp(`^${escapeRegExp(query)}`, 'i'),
   })
-    .select('username _id')
+    .select('username _id online lastSeen')
     .sort({ username: 1 })
     .limit(20)
     .lean();
@@ -360,7 +423,7 @@ router.get('/contacts', requireAfaPayAuth, async (req, res) => {
     ),
   );
   const users = contactIds.length
-    ? await User.find({ _id: { $in: contactIds } }).select('username _id').lean()
+    ? await User.find({ _id: { $in: contactIds } }).select('username _id online lastSeen').lean()
     : [];
   const roomByContactId = new Map();
   rooms.forEach((room) => {
@@ -457,11 +520,54 @@ router.get('/messages/:roomId', requireAfaPayAuth, async (req, res) => {
   return res.json(await Promise.all(visibleMessages.map(messageForClient)));
 });
 
+router.post('/messages/upload', requireAfaPayAuth, chatMediaUpload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ success: false, message: 'No chat media file uploaded.' });
+  }
+
+  try {
+    const type = resolveChatUploadType(req.file, req.body?.type);
+    const result = await mediaStorage.upload(req.file, {
+      folder: 'afapay-chat',
+      type,
+      area: `afapay_chat_${type}`,
+    });
+    logUploadAudit({ area: `afapay_chat_${type}`, file: req.file, result });
+
+    return res.json({
+      success: true,
+      type,
+      messageKey: mediaMessageKeyFor(type),
+      url: result.secure_url,
+      publicId: result.public_id,
+      originalName: req.file.originalname,
+      mimeType: req.file.mimetype,
+      bytes: result.bytes || req.file.size || 0,
+    });
+  } catch (err) {
+    console.error('[AfaPayChat] media upload failed:', err.message);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to upload chat media.',
+    });
+  }
+});
+
 router.post('/messages', requireAfaPayAuth, async (req, res) => {
   const roomId = String(req.body.roomId || '').trim();
   const text = String(req.body.text || '').trim();
   const repliedTo = String(req.body.repliedTo || '').trim();
-  if (!text) return res.status(400).json({ success: false, message: 'Message text is required.' });
+  const imageUrl = String(req.body.imageUrl || '').trim();
+  const videoUrl = String(req.body.videoUrl || '').trim();
+  const audioUrl = String(req.body.audioUrl || '').trim();
+  const fileUrl = String(req.body.fileUrl || '').trim();
+  const mediaType = String(req.body.mediaType || '').trim();
+  const mediaName = String(req.body.mediaName || '').trim();
+  const mediaMimeType = String(req.body.mediaMimeType || '').trim();
+  const mediaSizeBytes = Number(req.body.mediaSizeBytes || 0);
+  if (!text && !imageUrl && !videoUrl && !audioUrl && !fileUrl) {
+    return res.status(400).json({ success: false, message: 'Message content is required.' });
+  }
 
   const room = await ensureRoomParticipant(roomId, req.afapayUser._id);
   if (!room) return res.status(403).json({ success: false, message: 'Not authorized for this room.' });
@@ -480,10 +586,20 @@ router.post('/messages', requireAfaPayAuth, async (req, res) => {
     conversationId: room._id,
     senderId: req.afapayUser._id,
     text: text.slice(0, 2000),
+    imageUrl,
+    videoUrl,
+    audioUrl,
+    fileUrl,
+    mediaType: ['image', 'video', 'audio', 'file'].includes(mediaType)
+      ? mediaType
+      : resolveChatUploadType(null, imageUrl ? 'image' : videoUrl ? 'video' : audioUrl ? 'audio' : fileUrl ? 'file' : ''),
+    mediaName: mediaName.slice(0, 255),
+    mediaMimeType: mediaMimeType.slice(0, 120),
+    mediaSizeBytes: Number.isFinite(mediaSizeBytes) && mediaSizeBytes > 0 ? mediaSizeBytes : 0,
     repliedTo: replyMessage?._id || null,
     timestamp: new Date(),
   });
-  room.lastMessage = message.text;
+  room.lastMessage = message.text || mediaPreview(message);
   room.lastMessageAt = message.timestamp;
   await room.save();
 

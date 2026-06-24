@@ -58,6 +58,9 @@ class MessageInputBar extends StatelessWidget {
           final horizontalPadding = compact ? 14.0 : 24.0;
           final sendSize = compact ? 52.0 : 58.0;
           final toolSize = compact ? 38.0 : 42.0;
+          final menuReserve = showAttachmentMenu
+              ? (compact ? 276.0 : 286.0)
+              : 0.0;
 
           return Padding(
             padding: EdgeInsets.fromLTRB(
@@ -70,6 +73,7 @@ class MessageInputBar extends StatelessWidget {
               clipBehavior: Clip.none,
               alignment: Alignment.bottomRight,
               children: [
+                SizedBox(height: sendSize + menuReserve),
                 ValueListenableBuilder<TextEditingValue>(
                   valueListenable: controller,
                   builder: (context, value, _) {

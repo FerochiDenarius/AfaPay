@@ -1,5 +1,4 @@
 import 'dart:convert';
-
 import 'package:http/http.dart' as http;
 
 import '../../../core/config/api_config.dart';
@@ -164,6 +163,49 @@ class ChatRepository {
     return ChatMessage.fromJson(json);
   }
 
+  Future<ChatMediaUpload> uploadChatMedia({
+    required String filePath,
+    required ChatMediaType type,
+  }) async {
+    final json = await _sendMultipart(
+      '/api/messages/upload',
+      filePath: filePath,
+      fields: {'type': chatMediaTypeName(type)},
+    );
+    if (json is! Map<String, dynamic>) {
+      throw const ChatApiException('Unable to upload media.');
+    }
+    final upload = ChatMediaUpload.fromJson(json);
+    if (upload.url.isEmpty) {
+      throw const ChatApiException('Media upload did not return a URL.');
+    }
+    return upload;
+  }
+
+  Future<ChatMessage> sendMediaMessage({
+    required String roomId,
+    required ChatMediaUpload upload,
+    String text = '',
+    String? repliedToMessageId,
+  }) async {
+    final mediaKey = upload.messageKey;
+    final json = await _sendJson('/api/messages', {
+      'roomId': roomId,
+      'text': text.trim(),
+      mediaKey: upload.url,
+      'mediaType': chatMediaTypeName(upload.type),
+      if (upload.originalName != null) 'mediaName': upload.originalName,
+      if (upload.mimeType != null) 'mediaMimeType': upload.mimeType,
+      if (upload.bytes > 0) 'mediaSizeBytes': upload.bytes,
+      if (repliedToMessageId != null && repliedToMessageId.isNotEmpty)
+        'repliedTo': repliedToMessageId,
+    });
+    if (json is! Map<String, dynamic>) {
+      throw const ChatApiException('Unable to send media message.');
+    }
+    return ChatMessage.fromJson(json);
+  }
+
   Future<void> markAsRead(String roomId) async {
     await _sendJson('/api/messages/$roomId/mark-as-read', const {});
   }
@@ -226,6 +268,44 @@ class ChatRepository {
     return _requestJson('POST', path, body: body);
   }
 
+  Future<Object?> _sendMultipart(
+    String path, {
+    required String filePath,
+    required Map<String, String> fields,
+  }) async {
+    final token = await _tokenStorage.readAccessToken();
+    if (token == null || token.isEmpty) {
+      throw const ChatAuthExpiredException();
+    }
+
+    var response = await _sendMultipartRequest(
+      path,
+      token: token,
+      fields: fields,
+      filePath: filePath,
+    );
+
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      final refreshed = await _refreshTokens();
+      if (refreshed == null) {
+        await _tokenStorage.clear();
+        throw const ChatAuthExpiredException();
+      }
+      response = await _sendMultipartRequest(
+        path,
+        token: refreshed.accessToken,
+        fields: fields,
+        filePath: filePath,
+      );
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        await _tokenStorage.clear();
+        throw const ChatAuthExpiredException();
+      }
+    }
+
+    return _decodeResponse(response);
+  }
+
   Future<Object?> _requestJson(
     String method,
     String path, {
@@ -278,6 +358,30 @@ class ChatRepository {
         : _client
               .post(uri, headers: headers, body: jsonEncode(body))
               .timeout(const Duration(seconds: 20));
+  }
+
+  Future<http.Response> _sendMultipartRequest(
+    String path, {
+    required String token,
+    required Map<String, String> fields,
+    required String filePath,
+  }) async {
+    final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl$path'))
+      ..headers.addAll({
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+      })
+      ..fields.addAll(fields)
+      ..files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          filePath,
+          filename: _fileName(filePath),
+        ),
+      );
+
+    final streamed = await request.send().timeout(const Duration(seconds: 60));
+    return http.Response.fromStream(streamed);
   }
 
   Future<AuthTokens?> _refreshTokens() async {
@@ -340,4 +444,10 @@ class ChatRepository {
     }
     return json;
   }
+}
+
+String _fileName(String path) {
+  final normalized = path.replaceAll('\\', '/');
+  final name = normalized.split('/').last;
+  return name.isEmpty ? 'upload' : name;
 }

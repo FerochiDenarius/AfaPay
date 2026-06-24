@@ -3,6 +3,79 @@
 This file is updated after every completed UI task. It records what was built,
 the behavior implemented, navigation decisions, tests, and device deployment.
 
+## 2026-06-24 - Chat Gallery Media Picker and Backend Media Wiring
+
+### UI
+
+- Added a WhatsApp-style gallery launcher for the chat attachment Gallery
+  action.
+- Added a full-screen image/video editor preview with top editing controls,
+  caption input, recipient pill, and circular send button.
+- Added media previews inside outgoing chat bubbles for selected images/videos.
+- Registered supplied media picker reference images as Flutter assets for the
+  local picker launcher sample grid.
+- Fixed the attachment popup hit-test area so visible attachment actions are
+  tappable.
+- Added Android and iOS photo/video/camera permission declarations.
+
+### Logic and Backend
+
+- Added `image_picker` and `video_player` dependencies for device media
+  selection and local video preview.
+- Added `ChatMediaDraft` and reusable media upload/send models.
+- Added authenticated multipart media upload support to `ChatRepository`.
+- Added backend Afapay chat media upload endpoint at `/api/messages/upload`.
+- Extended Afapay chat messages with image, video, audio, file, and media
+  metadata fields.
+- Extended Afapay chat send to accept media messages with optional captions.
+- Exposed `online` and `lastSeen` fields from Afapay chat participants and
+  added a best-effort chat room presence refresh on the Flutter side.
+
+### Verification
+
+- Added widget coverage for opening the Gallery media picker launcher from the
+  attachment menu.
+- `flutter analyze`: pending.
+- `flutter test`: pending.
+- Backend `node --check` for modified Afapay chat files: passed.
+- Debug APK install and launch on OPPO `CPH2819`: pending.
+
+## 2026-06-24 - Login Light Theme
+
+### UI
+
+- Added a light-theme login experience matching the supplied
+  `loginLightTheme.png` reference.
+- Added a light-theme main dashboard experience matching the supplied
+  `mainPageLightTheme.png` reference.
+- Added the light login artwork asset to Flutter assets.
+- Added the light main dashboard artwork asset to Flutter assets for the logo
+  card crop.
+- Declared the actual app logo asset, `logo.png`, for in-app branding.
+- Replaced Android and iOS launcher icon assets with the supplied AFA app icon.
+- Updated the login screen to choose the light or dark artwork from the active
+  app theme.
+- Added light-theme field styling with pale surfaces, visible borders, dark
+  labels, muted placeholders, yellow action button, forgot-password chevron,
+  divider copy, and outlined Sign Up button.
+- Preserved the existing dark login layout and social-login row for dark mode.
+- Updated the main dashboard to use a white background, rounded logo card,
+  white feature tiles, gold icons, dark labels, and light bottom navigation in
+  light mode.
+- Preserved the dark dashboard layout for dark mode.
+
+### Logic and Backend
+
+- No backend changes.
+- Existing login authentication flow remains unchanged.
+
+### Verification
+
+- Added widget coverage for the light login Sign Up section.
+- `flutter analyze`: passed.
+- `flutter test`: passed.
+- Debug APK install and launch on OPPO `CPH2819`: passed.
+
 ## 2026-06-24 - Chat Room Input Attachments and Composer Behavior
 
 ### UI
@@ -30,10 +103,9 @@ the behavior implemented, navigation decisions, tests, and device deployment.
 - Added widget coverage for camera hiding, mic/send switching, local mock send,
   and attachment menu labels.
 - Updated chat dark/light golden screenshots.
-- `flutter analyze`: pending final run for this entry.
-- `flutter test test/features/chat/chat_room_screen_golden_test.dart`: pending
-  final run for this entry.
-- Debug APK install on OPPO `CPH2819`: pending final run for this entry.
+- `flutter analyze`: passed.
+- `flutter test test/features/chat/chat_room_screen_golden_test.dart`: passed.
+- Debug APK install and launch on OPPO `CPH2819`: passed.
 
 ## 2026-06-24 - Chat Room UI Refactor
 

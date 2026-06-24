@@ -4,12 +4,14 @@ class ChatParticipant {
     required this.username,
     this.profileImage,
     this.isOnline = false,
+    this.lastSeen,
   });
 
   final String id;
   final String username;
   final String? profileImage;
   final bool isOnline;
+  final DateTime? lastSeen;
 
   factory ChatParticipant.fromJson(Map<String, dynamic> json) {
     return ChatParticipant(
@@ -21,6 +23,7 @@ class ChatParticipant {
         json['profileImage'] ?? json['profilePicture'] ?? json['avatar'],
       ),
       isOnline: json['isOnline'] == true || json['online'] == true,
+      lastSeen: _date(json['lastSeen']),
     );
   }
 }
@@ -102,6 +105,14 @@ class ChatMessage {
     required this.senderId,
     this.senderName,
     this.text,
+    this.imageUrl,
+    this.videoUrl,
+    this.audioUrl,
+    this.fileUrl,
+    this.mediaType,
+    this.mediaName,
+    this.mediaMimeType,
+    this.mediaSizeBytes = 0,
     this.repliedTo,
     this.createdAt,
   });
@@ -111,8 +122,22 @@ class ChatMessage {
   final String senderId;
   final String? senderName;
   final String? text;
+  final String? imageUrl;
+  final String? videoUrl;
+  final String? audioUrl;
+  final String? fileUrl;
+  final String? mediaType;
+  final String? mediaName;
+  final String? mediaMimeType;
+  final int mediaSizeBytes;
   final ChatMessage? repliedTo;
   final DateTime? createdAt;
+
+  bool get hasMedia =>
+      imageUrl != null ||
+      videoUrl != null ||
+      audioUrl != null ||
+      fileUrl != null;
 
   bool isMine(String? currentUserId) =>
       currentUserId != null && senderId == currentUserId;
@@ -128,10 +153,51 @@ class ChatMessage {
           ? _nullableString(sender['username'])
           : null,
       text: _nullableString(json['text']),
+      imageUrl: _nullableString(json['imageUrl']),
+      videoUrl: _nullableString(json['videoUrl']),
+      audioUrl: _nullableString(json['audioUrl']),
+      fileUrl: _nullableString(json['fileUrl']),
+      mediaType: _nullableString(json['mediaType']),
+      mediaName: _nullableString(json['mediaName']),
+      mediaMimeType: _nullableString(json['mediaMimeType']),
+      mediaSizeBytes: _int(json['mediaSizeBytes']),
       repliedTo: repliedTo is Map<String, dynamic>
           ? ChatMessage.fromJson(repliedTo)
           : null,
       createdAt: _date(json['createdAt'] ?? json['timestamp']),
+    );
+  }
+}
+
+enum ChatMediaType { image, video, audio, file }
+
+class ChatMediaUpload {
+  const ChatMediaUpload({
+    required this.type,
+    required this.messageKey,
+    required this.url,
+    this.originalName,
+    this.mimeType,
+    this.bytes = 0,
+  });
+
+  final ChatMediaType type;
+  final String messageKey;
+  final String url;
+  final String? originalName;
+  final String? mimeType;
+  final int bytes;
+
+  factory ChatMediaUpload.fromJson(Map<String, dynamic> json) {
+    return ChatMediaUpload(
+      type: _mediaType(json['type']),
+      messageKey: _string(json['messageKey']).isEmpty
+          ? _messageKeyFor(_mediaType(json['type']))
+          : _string(json['messageKey']),
+      url: _string(json['url']),
+      originalName: _nullableString(json['originalName']),
+      mimeType: _nullableString(json['mimeType']),
+      bytes: _int(json['bytes']),
     );
   }
 }
@@ -144,6 +210,38 @@ String _messagePreview(Map<String, dynamic> json) {
   if (_nullableString(json['videoUrl']) != null) return 'Video';
   if (_nullableString(json['fileUrl']) != null) return 'File';
   return 'New message';
+}
+
+ChatMediaType _mediaType(Object? value) {
+  switch (value?.toString()) {
+    case 'video':
+      return ChatMediaType.video;
+    case 'audio':
+      return ChatMediaType.audio;
+    case 'file':
+      return ChatMediaType.file;
+    case 'image':
+    default:
+      return ChatMediaType.image;
+  }
+}
+
+String _messageKeyFor(ChatMediaType type) {
+  return switch (type) {
+    ChatMediaType.image => 'imageUrl',
+    ChatMediaType.video => 'videoUrl',
+    ChatMediaType.audio => 'audioUrl',
+    ChatMediaType.file => 'fileUrl',
+  };
+}
+
+String chatMediaTypeName(ChatMediaType type) {
+  return switch (type) {
+    ChatMediaType.image => 'image',
+    ChatMediaType.video => 'video',
+    ChatMediaType.audio => 'audio',
+    ChatMediaType.file => 'file',
+  };
 }
 
 String _string(Object? value) => value?.toString() ?? '';

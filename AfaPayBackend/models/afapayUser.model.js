@@ -100,6 +100,15 @@ const afapayUserSchema = new Schema(
         ref: 'AfaPayUser',
       },
     ],
+    online: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    lastSeen: {
+      type: Date,
+      default: null,
+    },
   },
   {
     collection: 'afapay_users',

@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:afa_pay/features/chat/presentation/chat_room_screen.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -100,6 +100,25 @@ void main() {
     expect(find.text('Location'), findsOneWidget);
     expect(find.text('Poll'), findsOneWidget);
     expect(find.text('Event'), findsOneWidget);
+  });
+
+  testWidgets('gallery attachment opens media picker launcher', (tester) async {
+    await setPhoneSurface(tester);
+    await tester.pumpWidget(const ChatRoomDarkPreview());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Add'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find
+          .ancestor(of: find.text('Gallery'), matching: find.byType(InkWell))
+          .first,
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Recents'), findsOneWidget);
+    expect(find.text('Device media'), findsOneWidget);
+    expect(find.text('Add a caption...'), findsOneWidget);
   });
 }
 

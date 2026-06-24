@@ -27,6 +27,47 @@ const afapayMessageSchema = new Schema(
       maxlength: 2000,
       default: '',
     },
+    imageUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    videoUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    audioUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    fileUrl: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+    mediaType: {
+      type: String,
+      enum: ['image', 'video', 'audio', 'file', ''],
+      default: '',
+    },
+    mediaName: {
+      type: String,
+      trim: true,
+      maxlength: 255,
+      default: '',
+    },
+    mediaMimeType: {
+      type: String,
+      trim: true,
+      maxlength: 120,
+      default: '',
+    },
+    mediaSizeBytes: {
+      type: Number,
+      default: 0,
+    },
     repliedTo: {
       type: Schema.Types.ObjectId,
       ref: 'AfaPayMessage',

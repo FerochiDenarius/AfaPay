@@ -86,6 +86,7 @@ class DashboardGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        final isLight = Theme.of(context).brightness == Brightness.light;
         final isCompact = constraints.maxWidth < 360;
         return GridView.builder(
           shrinkWrap: true,
@@ -93,15 +94,16 @@ class DashboardGrid extends StatelessWidget {
           itemCount: dashboardFeatures.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
-            mainAxisSpacing: isCompact ? 10 : 12,
-            crossAxisSpacing: isCompact ? 10 : 12,
-            childAspectRatio: isCompact ? 0.96 : 1.02,
+            mainAxisSpacing: isLight ? 18 : (isCompact ? 10 : 12),
+            crossAxisSpacing: isLight ? 18 : (isCompact ? 10 : 12),
+            childAspectRatio: isLight ? 0.95 : (isCompact ? 0.96 : 1.02),
           ),
           itemBuilder: (context, index) {
             final feature = dashboardFeatures[index];
             return _FeatureCard(
               feature: feature,
               isCompact: isCompact,
+              isLight: isLight,
               onTap: () => onSelected(feature),
             );
           },
@@ -115,11 +117,13 @@ class _FeatureCard extends StatelessWidget {
   const _FeatureCard({
     required this.feature,
     required this.isCompact,
+    required this.isLight,
     required this.onTap,
   });
 
   final DashboardFeature feature;
   final bool isCompact;
+  final bool isLight;
   final VoidCallback onTap;
 
   @override
@@ -131,14 +135,22 @@ class _FeatureCard extends StatelessWidget {
         onTap: onTap,
         child: Ink(
           decoration: BoxDecoration(
-            color: const Color(0xFF08111E).withValues(alpha: 0.92),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: const Color(0xFF22334A)),
-            boxShadow: const [
+            color: isLight
+                ? Colors.white
+                : const Color(0xFF08111E).withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(isLight ? 18 : 24),
+            border: Border.all(
+              color: isLight
+                  ? const Color(0xFFE8EBF0)
+                  : const Color(0xFF22334A),
+            ),
+            boxShadow: [
               BoxShadow(
-                color: Color(0x66000000),
-                blurRadius: 16,
-                offset: Offset(0, 8),
+                color: isLight
+                    ? const Color(0x12000000)
+                    : const Color(0x66000000),
+                blurRadius: isLight ? 18 : 16,
+                offset: Offset(0, isLight ? 10 : 8),
               ),
             ],
           ),
@@ -153,7 +165,11 @@ class _FeatureCard extends StatelessWidget {
                 Flexible(
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
-                    child: Icon(feature.icon, color: _gold, size: 34),
+                    child: Icon(
+                      feature.icon,
+                      color: _gold,
+                      size: isLight ? 31 : 34,
+                    ),
                   ),
                 ),
                 SizedBox(height: isCompact ? 7 : 9),
@@ -165,8 +181,9 @@ class _FeatureCard extends StatelessWidget {
                     softWrap: true,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
+                      color: isLight ? const Color(0xFF3C3D42) : null,
                       fontWeight: FontWeight.w800,
-                      fontSize: isCompact ? 12.5 : 13.5,
+                      fontSize: isLight ? 13 : (isCompact ? 12.5 : 13.5),
                       height: 1.08,
                     ),
                   ),

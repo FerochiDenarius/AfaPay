@@ -39,6 +39,8 @@ dependencies:
   go_router: ^17.2.3
   http: ^1.6.0
   flutter_secure_storage: ^9.2.4
+  image_picker: ^1.2.2
+  video_player: ^2.10.1
 
 dev_dependencies:
   flutter_test:
@@ -64,10 +66,15 @@ flutter:
 
   assets:
     - UIdesignImages/loginPage.png
+    - UIdesignImages/loginLightTheme.png
+    - UIdesignImages/mainPageLightTheme.png
+    - UIdesignImages/mediaPicker.jpeg
+    - UIdesignImages/mediaPicker2.jpeg
     - UIdesignImages/registrationsPage.png
     - UIdesignImages/EmailEntryPage.png
     - UIdesignImages/EmailCodePage.png
     - UIdesignImages/logoEmblem.png
+    - UIdesignImages/logo.png
 
   # To add assets to your application, add an assets section, like this:
   # assets:

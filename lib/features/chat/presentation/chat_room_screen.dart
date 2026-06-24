@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../models/chat_media_draft.dart';
 import '../models/chat_models.dart';
+import '../repositories/chat_repository.dart';
+import 'chat_media_picker_screen.dart';
 import 'widgets/chat_header.dart';
 import 'widgets/message_bubble.dart';
 import 'widgets/message_input_bar.dart';
@@ -21,13 +26,29 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _messageController = TextEditingController();
   final _inputFocusNode = FocusNode();
   final _scrollController = ScrollController();
+  final _repository = ChatRepository();
 
   bool _showEmojiMenu = true;
   bool _showAttachmentMenu = false;
+  bool _sendingMedia = false;
+  Timer? _presenceTimer;
+  ChatConversation? _conversation;
   List<_MockChatMessage> _messages = List.of(_mockMessages);
 
   @override
+  void initState() {
+    super.initState();
+    _conversation = widget.conversation;
+    _presenceTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshPresence(),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshPresence());
+  }
+
+  @override
   void dispose() {
+    _presenceTimer?.cancel();
     _messageController.dispose();
     _inputFocusNode.dispose();
     _scrollController.dispose();
@@ -78,12 +99,106 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     });
   }
 
+  Future<void> _refreshPresence() async {
+    final current = _conversation ?? widget.conversation;
+    if (current == null || !mounted) return;
+    try {
+      final rooms = current.isGroup
+          ? await _repository.fetchGroups()
+          : await _repository.fetchPrivateChats();
+      if (!mounted) return;
+      for (final room in rooms) {
+        if (room.id == widget.roomId) {
+          setState(() => _conversation = room);
+          return;
+        }
+      }
+    } on Object {
+      // Presence refresh is best-effort; chat UI should remain usable offline.
+    }
+  }
+
+  Future<void> _openMediaPicker() async {
+    setState(() {
+      _showAttachmentMenu = false;
+      _showEmojiMenu = false;
+    });
+    final title = (_conversation ?? widget.conversation)?.title ?? 'denarius';
+    final draft = await Navigator.of(context).push<ChatMediaDraft>(
+      MaterialPageRoute(
+        builder: (_) => ChatMediaPickerScreen(recipientName: title),
+        fullscreenDialog: true,
+      ),
+    );
+    if (draft == null || !mounted) return;
+    await _sendMediaDraft(draft);
+  }
+
+  Future<void> _sendMediaDraft(ChatMediaDraft draft) async {
+    if (_sendingMedia) return;
+    final now = TimeOfDay.now().format(context);
+    final localMessage = _MockChatMessage(
+      text: draft.caption,
+      time: now,
+      isOutgoing: true,
+      mediaType: draft.type,
+      localMediaPath: draft.filePath,
+      assetMediaPath: draft.assetPath,
+    );
+
+    setState(() {
+      _sendingMedia = true;
+      _messages = [..._messages, localMessage];
+    });
+    _scrollToBottom();
+
+    if (!draft.isDeviceFile) {
+      setState(() => _sendingMedia = false);
+      return;
+    }
+
+    try {
+      final upload = await _repository.uploadChatMedia(
+        filePath: draft.filePath!,
+        type: draft.type,
+      );
+      await _repository.sendMediaMessage(
+        roomId: widget.roomId,
+        upload: upload,
+        text: draft.caption,
+      );
+    } on ChatAuthExpiredException {
+      if (!mounted) return;
+      _showTemporaryAction('Media added locally. Sign in again to send it.');
+    } on ChatApiException catch (error) {
+      if (!mounted) return;
+      _showTemporaryAction('Media added locally. ${error.message}');
+    } on Object {
+      if (!mounted) return;
+      _showTemporaryAction('Media added locally. Backend send failed.');
+    } finally {
+      if (mounted) setState(() => _sendingMedia = false);
+    }
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollController.hasClients) return;
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.chatColors;
-    final title = widget.conversation?.title ?? 'denarius';
-    final isOnline = widget.conversation?.participant?.isOnline ?? true;
-    final avatarUrl = widget.conversation?.imageUrl;
+    final conversation = _conversation ?? widget.conversation;
+    final title = conversation?.title ?? 'denarius';
+    final isOnline = conversation?.participant?.isOnline ?? true;
+    final avatarUrl = conversation?.imageUrl;
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
@@ -140,7 +255,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     _showEmojiMenu = false;
                   });
                 },
-                onCameraPressed: () => _showTemporaryAction('Camera'),
+                onCameraPressed: _openMediaPicker,
                 onEmojiButtonPressed: () {
                   setState(() {
                     _showEmojiMenu = !_showEmojiMenu;
@@ -148,7 +263,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   });
                 },
                 onDocument: () => _showToast('Document'),
-                onGallery: () => _showToast('Gallery'),
+                onGallery: _openMediaPicker,
                 onContact: () => _showToast('Contact'),
                 onLocation: () => _showToast('Location'),
                 onPoll: () => _showToast('Poll'),
@@ -203,6 +318,9 @@ class _MessageArea extends StatelessWidget {
               time: message.time,
               isOutgoing: message.isOutgoing,
               showReadReceipt: message.isOutgoing,
+              mediaType: message.mediaType,
+              localMediaPath: message.localMediaPath,
+              assetMediaPath: message.assetMediaPath,
             ),
         ],
       ),
@@ -245,11 +363,17 @@ class _MockChatMessage {
     required this.text,
     required this.time,
     required this.isOutgoing,
+    this.mediaType,
+    this.localMediaPath,
+    this.assetMediaPath,
   });
 
   final String text;
   final String time;
   final bool isOutgoing;
+  final ChatMediaType? mediaType;
+  final String? localMediaPath;
+  final String? assetMediaPath;
 }
 
 const _mockMessages = [
