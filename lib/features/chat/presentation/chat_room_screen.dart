@@ -1,18 +1,11 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../models/chat_models.dart';
-import '../models/chat_room_settings.dart';
-import '../repositories/chat_repository.dart';
-import 'widgets/chat_composer.dart';
-import 'widgets/chat_message_list.dart';
-import 'widgets/chat_room_menu.dart';
-import 'widgets/chat_room_title.dart';
-import 'widgets/chat_theme_sheet.dart';
-import 'widgets/chat_wallpaper.dart';
-import 'widgets/disappearing_messages_sheet.dart';
+import 'widgets/chat_header.dart';
+import 'widgets/message_bubble.dart';
+import 'widgets/message_input_bar.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   const ChatRoomScreen({super.key, required this.roomId, this.conversation});
@@ -25,507 +18,290 @@ class ChatRoomScreen extends StatefulWidget {
 }
 
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
-  final _repository = ChatRepository();
   final _messageController = TextEditingController();
-  final _scrollController = ScrollController();
   final _inputFocusNode = FocusNode();
+  final _scrollController = ScrollController();
 
-  Timer? _pollTimer;
-  bool _isRefreshing = false;
-  bool _isLoading = true;
-  bool _isSending = false;
-  String? _errorMessage;
-  String? _currentUserId;
-  ChatMessage? _replyingTo;
-  ChatRoomSettings _settings = ChatRoomSettings.defaults;
-  List<ChatMessage> _messages = const [];
-
-  Color get _accent => _settings.theme.accent;
-
-  ChatParticipant? get _targetParticipant => widget.conversation?.participant;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadSettings();
-    _loadMessages();
-    _pollTimer = Timer.periodic(
-      const Duration(seconds: 3),
-      (_) => _refreshMessages(),
-    );
-  }
+  bool _showEmojiMenu = true;
+  bool _showAttachmentMenu = false;
+  List<_MockChatMessage> _messages = List.of(_mockMessages);
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
     _messageController.dispose();
-    _scrollController.dispose();
     _inputFocusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadSettings() async {
-    try {
-      final settings = await _repository.fetchRoomSettings(widget.roomId);
-      if (!mounted) return;
-      setState(() => _settings = settings);
-    } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _settings = ChatRoomSettings.defaults);
-    }
+  void _showToast(String label) {
+    setState(() {
+      _showEmojiMenu = false;
+      _showAttachmentMenu = false;
+    });
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(label)));
   }
 
-  Future<void> _saveSettings(ChatRoomSettings settings) async {
-    setState(() => _settings = settings);
-    try {
-      final savedSettings = await _repository.saveRoomSettings(
-        roomId: widget.roomId,
-        settings: settings,
-      );
-      if (!mounted) return;
-      setState(() => _settings = savedSettings);
-    } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
-    } on ChatApiException catch (error) {
-      _showError(error.message);
-    } catch (_) {
-      _showError('Unable to save chat settings.');
-    }
+  void _showTemporaryAction(String label) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(label)));
   }
 
-  Future<void> _loadMessages() async {
-    await _refreshMessages(showLoading: true, forceScrollToEnd: true);
-  }
-
-  Future<void> _refreshMessages({
-    bool showLoading = false,
-    bool forceScrollToEnd = false,
-  }) async {
-    if (_isRefreshing) return;
-    _isRefreshing = true;
-    if (showLoading && mounted) {
-      setState(() {
-        _isLoading = true;
-        _errorMessage = null;
-      });
-    }
-
-    final wasNearBottom =
-        !_scrollController.hasClients ||
-        _scrollController.position.maxScrollExtent -
-                _scrollController.position.pixels <
-            120;
-    try {
-      final results = await Future.wait([
-        _repository.fetchMessages(widget.roomId),
-        _repository.currentUserId(),
-      ]);
-      await _repository.markAsRead(widget.roomId);
-      if (!mounted) return;
-      final nextMessages = results[0] as List<ChatMessage>;
-      final hadNewMessages =
-          nextMessages.length != _messages.length ||
-          (nextMessages.isNotEmpty &&
-              _messages.isNotEmpty &&
-              nextMessages.last.id != _messages.last.id) ||
-          (nextMessages.isNotEmpty && _messages.isEmpty);
-      setState(() {
-        _messages = nextMessages;
-        _currentUserId = results[1] as String?;
-        _isLoading = false;
-        _errorMessage = null;
-      });
-      if (forceScrollToEnd || (hadNewMessages && wasNearBottom)) {
-        _scrollToEnd();
-      }
-    } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
-    } on ChatApiException catch (error) {
-      if (!mounted) return;
-      if (showLoading) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = error.message;
-        });
-      }
-    } catch (_) {
-      if (!mounted) return;
-      if (showLoading) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Unable to load messages.';
-        });
-      }
-    } finally {
-      _isRefreshing = false;
-    }
-  }
-
-  Future<void> _send() async {
+  void _sendMockMessage() {
     final text = _messageController.text.trim();
-    if (text.isEmpty || _isSending) return;
-    final reply = _replyingTo;
-    setState(() => _isSending = true);
-    try {
-      final message = await _repository.sendMessage(
-        roomId: widget.roomId,
-        text: text,
-        repliedToMessageId: reply?.id,
-      );
-      if (!mounted) return;
+    if (text.isEmpty) return;
+
+    setState(() {
+      _messages = [
+        ..._messages,
+        _MockChatMessage(
+          text: text,
+          time: TimeOfDay.now().format(context),
+          isOutgoing: true,
+        ),
+      ];
       _messageController.clear();
-      setState(() {
-        _messages = [..._messages, message];
-        _replyingTo = null;
-        _isSending = false;
-      });
-      _scrollToEnd();
-    } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
-    } on ChatApiException catch (error) {
-      _showError(error.message);
-      if (mounted) setState(() => _isSending = false);
-    } catch (_) {
-      _showError('Unable to send message.');
-      if (mounted) setState(() => _isSending = false);
-    }
-  }
+      _showEmojiMenu = false;
+      _showAttachmentMenu = false;
+    });
 
-  List<ChatMessage> _visibleMessages() {
-    final now = DateTime.now();
-    final disappearingCutoff = _settings.disappearingSeconds == null
-        ? null
-        : now.subtract(Duration(seconds: _settings.disappearingSeconds!));
-
-    return _messages.where((message) {
-      final createdAt = message.createdAt;
-      final clearedBefore = _settings.clearedBefore;
-      if (clearedBefore != null &&
-          createdAt != null &&
-          !createdAt.isAfter(clearedBefore)) {
-        return false;
-      }
-      if (disappearingCutoff != null &&
-          createdAt != null &&
-          !createdAt.isAfter(disappearingCutoff)) {
-        return false;
-      }
-      return true;
-    }).toList();
-  }
-
-  void _setReplyTarget(ChatMessage message) {
-    setState(() => _replyingTo = message);
-    _inputFocusNode.requestFocus();
-  }
-
-  void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 250),
+        duration: const Duration(milliseconds: 220),
         curve: Curves.easeOut,
       );
     });
   }
 
-  Future<void> _handleMenuAction(ChatRoomMenuAction action) async {
-    switch (action) {
-      case ChatRoomMenuAction.viewContact:
-        _showContactDialog();
-      case ChatRoomMenuAction.chatTheme:
-        await showChatThemeSheet(
-          context: context,
-          settings: _settings,
-          onChanged: (settings) => _saveSettings(settings),
-        );
-      case ChatRoomMenuAction.block:
-        await _blockContact();
-      case ChatRoomMenuAction.mute:
-        final next = _settings.copyWith(muted: !_settings.muted);
-        await _saveSettings(next);
-        _showInfo(
-          next.muted
-              ? 'Notifications muted for this chat.'
-              : 'Notifications unmuted.',
-        );
-      case ChatRoomMenuAction.disappearingMessages:
-        await showDisappearingMessagesSheet(
-          context: context,
-          settings: _settings,
-          onChanged: (settings) => _saveSettings(settings),
-        );
-      case ChatRoomMenuAction.report:
-        await _reportContact();
-      case ChatRoomMenuAction.newGroup:
-        context.push('/group-chat');
-      case ChatRoomMenuAction.clearChat:
-        await _clearChat();
-    }
-  }
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+    final title = widget.conversation?.title ?? 'denarius';
+    final isOnline = widget.conversation?.participant?.isOnline ?? true;
+    final avatarUrl = widget.conversation?.imageUrl;
 
-  void _showContactDialog() {
-    final title = widget.conversation?.title ?? 'Chat';
-    final isGroup = widget.conversation?.isGroup ?? false;
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: chatPanel,
-        title: Text(isGroup ? 'Group Info' : 'Contact Info'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            CircleAvatar(
-              radius: 34,
-              backgroundColor: _accent.withValues(alpha: 0.18),
-              child: Icon(
-                isGroup ? Icons.groups_rounded : Icons.person_rounded,
-                color: _accent,
-                size: 34,
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      backgroundColor: colors.background,
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [colors.background, colors.backgroundSecondary],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              ChatHeader(
+                username: title,
+                avatarUrl: avatarUrl,
+                isOnline: isOnline,
+                onBack: () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    context.go('/chats');
+                  }
+                },
+                onCall: () => context.push('/voice-call'),
+                onVideoCall: () => context.push('/video-call'),
+                onMore: () => _showTemporaryAction('More'),
               ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              isGroup
-                  ? '${widget.conversation?.memberCount ?? 0} members'
-                  : '@${_targetParticipant?.username ?? title}',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: chatMuted),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _blockContact() async {
-    final contact = _targetParticipant;
-    if (contact == null) {
-      _showError('Block is available for private chats.');
-      return;
-    }
-    final confirmed = await _confirmAction(
-      title: 'Block Contact',
-      message:
-          'Block ${contact.username}? You will not be able to send messages to this contact.',
-      confirmLabel: 'Block',
-    );
-    if (confirmed != true) return;
-    try {
-      await _repository.blockContact(contact.id);
-      _showInfo('${contact.username} blocked.');
-    } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
-    } on ChatApiException catch (error) {
-      _showError(error.message);
-    } catch (_) {
-      _showError('Unable to block contact.');
-    }
-  }
-
-  Future<void> _reportContact() async {
-    final contact = _targetParticipant;
-    if (contact == null) {
-      _showError('Report is available for private chats.');
-      return;
-    }
-    final reason = await _showReportDialog();
-    if (reason == null) return;
-    try {
-      await _repository.reportContact(
-        userId: contact.id,
-        roomId: widget.roomId,
-        reason: reason.isEmpty ? 'Reported from chat' : reason,
-      );
-      _showInfo('Report submitted.');
-    } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
-    } on ChatApiException catch (error) {
-      _showError(error.message);
-    } catch (_) {
-      _showError('Unable to submit report.');
-    }
-  }
-
-  Future<String?> _showReportDialog() async {
-    final controller = TextEditingController(text: 'Reported from chat');
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: chatPanel,
-        title: const Text('Report Contact'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'Reason',
-            prefixIcon: Icon(Icons.flag_outlined),
+              Expanded(
+                child: _MessageArea(
+                  messages: _messages,
+                  scrollController: _scrollController,
+                  onTap: () {
+                    if (_showEmojiMenu || _showAttachmentMenu) {
+                      setState(() {
+                        _showEmojiMenu = false;
+                        _showAttachmentMenu = false;
+                      });
+                    }
+                    _inputFocusNode.unfocus();
+                  },
+                ),
+              ),
+              MessageInputBar(
+                controller: _messageController,
+                focusNode: _inputFocusNode,
+                showEmojiMenu: _showEmojiMenu,
+                showAttachmentMenu: _showAttachmentMenu,
+                onAttachmentPressed: () {
+                  setState(() {
+                    _showAttachmentMenu = !_showAttachmentMenu;
+                    _showEmojiMenu = false;
+                  });
+                },
+                onCameraPressed: () => _showTemporaryAction('Camera'),
+                onEmojiButtonPressed: () {
+                  setState(() {
+                    _showEmojiMenu = !_showEmojiMenu;
+                    _showAttachmentMenu = false;
+                  });
+                },
+                onDocument: () => _showToast('Document'),
+                onGallery: () => _showToast('Gallery'),
+                onContact: () => _showToast('Contact'),
+                onLocation: () => _showToast('Location'),
+                onPoll: () => _showToast('Poll'),
+                onEvent: () => _showToast('Event'),
+                onEmoji: () => _showToast('Emoji'),
+                onGif: () => _showToast('GIF'),
+                onSticker: () => _showToast('Sticker'),
+                onSend: _sendMockMessage,
+                onVoiceMessage: () => _showToast('Voice message'),
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('Report'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return reason;
-  }
-
-  Future<void> _clearChat() async {
-    final confirmed = await _confirmAction(
-      title: 'Clear Chat',
-      message: 'Clear visible messages for you only?',
-      confirmLabel: 'Clear',
-    );
-    if (confirmed != true) return;
-    try {
-      final settings = await _repository.clearChat(widget.roomId);
-      if (!mounted) return;
-      setState(() => _settings = settings);
-      _showInfo('Chat cleared for you.');
-    } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
-    } on ChatApiException catch (error) {
-      _showError(error.message);
-    } catch (_) {
-      _showError('Unable to clear chat.');
-    }
-  }
-
-  Future<bool?> _confirmAction({
-    required String title,
-    required String message,
-    required String confirmLabel,
-  }) {
-    return showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: chatPanel,
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(confirmLabel),
-          ),
-        ],
       ),
     );
   }
+}
 
-  void _showError(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: const Color(0xFF8A1C24),
-      ),
-    );
-  }
+class _MessageArea extends StatelessWidget {
+  const _MessageArea({
+    required this.messages,
+    required this.scrollController,
+    required this.onTap,
+  });
 
-  void _showInfo(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
+  final List<_MockChatMessage> messages;
+  final ScrollController scrollController;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final title = widget.conversation?.title ?? 'Chat';
-    final isGroup = widget.conversation?.isGroup ?? false;
-    final visibleMessages = _visibleMessages();
-    final contact = _targetParticipant;
+    final width = MediaQuery.sizeOf(context).width;
+    final horizontalPadding = width >= 700 ? 40.0 : 24.0;
 
-    return Scaffold(
-      backgroundColor: chatNavy,
-      appBar: AppBar(
-        backgroundColor: chatNavy,
-        titleSpacing: 0,
-        title: ChatRoomTitle(
-          title: title,
-          isGroup: isGroup,
-          muted: _settings.muted,
-          accent: _accent,
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: onTap,
+      child: ListView(
+        controller: scrollController,
+        padding: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          22,
+          horizontalPadding,
+          16,
         ),
-        actions: [
-          IconButton(
-            tooltip: 'Voice Call',
-            onPressed: () => context.push('/voice-call'),
-            icon: const Icon(Icons.call_outlined),
-          ),
-          IconButton(
-            tooltip: 'Video Call',
-            onPressed: () => context.push('/video-call'),
-            icon: const Icon(Icons.videocam_outlined),
-          ),
-          ChatRoomMenu(
-            isGroup: isGroup,
-            settings: _settings,
-            contactAvailable: contact != null,
-            onSelected: _handleMenuAction,
-          ),
-        ],
-      ),
-      body: Column(
         children: [
-          Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: ChatWallpaperBackdrop(settings: _settings),
-                ),
-                ChatMessageList(
-                  isLoading: _isLoading,
-                  errorMessage: _errorMessage,
-                  accent: _accent,
-                  messages: visibleMessages,
-                  currentUserId: _currentUserId,
-                  scrollController: _scrollController,
-                  onRetry: _loadMessages,
-                  onReply: _setReplyTarget,
-                ),
-              ],
+          const _DateDivider(label: 'Today'),
+          const SizedBox(height: 12),
+          for (final message in messages)
+            MessageBubble(
+              text: message.text,
+              time: message.time,
+              isOutgoing: message.isOutgoing,
+              showReadReceipt: message.isOutgoing,
             ),
-          ),
-          ChatComposer(
-            controller: _messageController,
-            focusNode: _inputFocusNode,
-            replyingTo: _replyingTo,
-            accent: _accent,
-            isSending: _isSending,
-            onCancelReply: () => setState(() => _replyingTo = null),
-            onSend: _send,
-          ),
         ],
       ),
+    );
+  }
+}
+
+class _DateDivider extends StatelessWidget {
+  const _DateDivider({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 7),
+        decoration: BoxDecoration(
+          color: colors.glassSurface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.border),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: colors.secondaryText,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MockChatMessage {
+  const _MockChatMessage({
+    required this.text,
+    required this.time,
+    required this.isOutgoing,
+  });
+
+  final String text;
+  final String time;
+  final bool isOutgoing;
+}
+
+const _mockMessages = [
+  _MockChatMessage(text: 'hi', time: '11:30 AM', isOutgoing: true),
+  _MockChatMessage(text: 'how are you', time: '11:30 AM', isOutgoing: true),
+  _MockChatMessage(
+    text: 'am fine and you',
+    time: '11:30 AM',
+    isOutgoing: false,
+  ),
+  _MockChatMessage(text: 'sup for today', time: '11:31 AM', isOutgoing: true),
+  _MockChatMessage(text: 'nothing much', time: '11:31 AM', isOutgoing: false),
+  _MockChatMessage(
+    text: 'ok preparing for class ?',
+    time: '11:31 AM',
+    isOutgoing: true,
+  ),
+  _MockChatMessage(
+    text: 'no am at the bank',
+    time: '11:31 AM',
+    isOutgoing: false,
+  ),
+  _MockChatMessage(text: 'kk', time: '11:32 AM', isOutgoing: true),
+  _MockChatMessage(
+    text: 'ok I will hit you up when am done',
+    time: '11:32 AM',
+    isOutgoing: false,
+  ),
+];
+
+class ChatRoomDarkPreview extends StatelessWidget {
+  const ChatRoomDarkPreview({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: buildAfaPayTheme(Brightness.dark),
+      home: const ChatRoomScreen(roomId: 'preview'),
+    );
+  }
+}
+
+class ChatRoomLightPreview extends StatelessWidget {
+  const ChatRoomLightPreview({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: buildAfaPayTheme(Brightness.light),
+      home: const ChatRoomScreen(roomId: 'preview'),
     );
   }
 }

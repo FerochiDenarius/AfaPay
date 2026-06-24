@@ -3,6 +3,68 @@
 This file is updated after every completed UI task. It records what was built,
 the behavior implemented, navigation decisions, tests, and device deployment.
 
+## 2026-06-24 - Chat Room Input Attachments and Composer Behavior
+
+### UI
+
+- Added a reusable attachment popup for the chat composer.
+- Attachment actions are UI-only and include Document, Gallery, Contact,
+  Location, Poll, and Event.
+- Updated the composer action button to show a microphone when the input is
+  empty.
+- The microphone switches to the send icon immediately when typing starts.
+- The camera button remains inside the input field and disappears while text is
+  present.
+- Kept composer tool icons smaller and bottom-aligned inside the input area.
+
+### Logic and Backend
+
+- Kept the feature UI-only with no backend, socket, database, or API wiring.
+- Send appends a local mock outgoing message, clears the input, and scrolls the
+  mock conversation for frontend testing.
+- Attachment, emoji, GIF, sticker, and voice actions show temporary UI feedback
+  only.
+
+### Verification
+
+- Added widget coverage for camera hiding, mic/send switching, local mock send,
+  and attachment menu labels.
+- Updated chat dark/light golden screenshots.
+- `flutter analyze`: pending final run for this entry.
+- `flutter test test/features/chat/chat_room_screen_golden_test.dart`: pending
+  final run for this entry.
+- Debug APK install on OPPO `CPH2819`: pending final run for this entry.
+
+## 2026-06-24 - Chat Room UI Refactor
+
+### UI
+
+- Replaced the previous chat room presentation with a mock-data chat UI matching
+  the supplied dark and light chat mockups.
+- Added dark and light chat theme resources through a Flutter `ThemeExtension`.
+- Added reusable chat header, message bubble, message input bar, emoji popup,
+  and preview wrappers.
+- Implemented a custom header with back, avatar, username, online indicator,
+  call, video, and more buttons.
+- Added outgoing yellow bubbles, incoming dark/light bubbles, timestamps,
+  double-check receipts, and a centered Today divider.
+- Added a rounded input field with add, text entry, camera, emoji, and a
+  circular action button.
+
+### Logic and Backend
+
+- Removed repository polling, message fetch, send endpoint, and read-marking
+  calls from the chat room screen.
+- Used static mock conversation data only.
+- Kept components reusable for future backend integration.
+
+### Verification
+
+- Added dark and light golden screenshot tests.
+- `flutter analyze`: passed.
+- `flutter test`: passed.
+- Built and installed a debug APK on OPPO `CPH2819` after completed UI work.
+
 ## 2026-06-21 - Required Email Verification and Backend Wiring
 
 ### UI
