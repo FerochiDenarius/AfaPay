@@ -33,7 +33,12 @@ the behavior implemented, navigation decisions, tests, and device deployment.
 ### Verification
 
 - Added a widget test that confirms the emoji menu stays closed until tapped.
+- Updated chat room golden screenshots for the smaller bubble/input layout.
 - `flutter analyze`: passed.
+- `flutter test`: passed.
+- `flutter build apk --debug --dart-define=INITIAL_ROUTE=/chats`: passed.
+- Debug APK installed and launched on OPPO `CPH2819`.
+- Screenshot evidence saved to `docs/screenshots/afapay_chat_fix_oppo.png`.
 
 ## 2026-06-24 - Chat Contacts Light and Dark UI
 

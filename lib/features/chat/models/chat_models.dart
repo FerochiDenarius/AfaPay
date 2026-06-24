@@ -13,6 +13,16 @@ class ChatParticipant {
   final bool isOnline;
   final DateTime? lastSeen;
 
+  ChatParticipant copyWith({bool? isOnline, DateTime? lastSeen}) {
+    return ChatParticipant(
+      id: id,
+      username: username,
+      profileImage: profileImage,
+      isOnline: isOnline ?? this.isOnline,
+      lastSeen: lastSeen ?? this.lastSeen,
+    );
+  }
+
   factory ChatParticipant.fromJson(Map<String, dynamic> json) {
     return ChatParticipant(
       id: _string(json['_id'] ?? json['id'] ?? json['contactId']),
@@ -50,6 +60,25 @@ class ChatConversation {
   final DateTime? lastMessageTime;
   final ChatParticipant? participant;
   final int? memberCount;
+
+  ChatConversation copyWith({
+    String? subtitle,
+    int? unreadCount,
+    DateTime? lastMessageTime,
+    ChatParticipant? participant,
+  }) {
+    return ChatConversation(
+      id: id,
+      title: title,
+      isGroup: isGroup,
+      subtitle: subtitle ?? this.subtitle,
+      imageUrl: imageUrl,
+      unreadCount: unreadCount ?? this.unreadCount,
+      lastMessageTime: lastMessageTime ?? this.lastMessageTime,
+      participant: participant ?? this.participant,
+      memberCount: memberCount,
+    );
+  }
 
   factory ChatConversation.privateFromJson(Map<String, dynamic> json) {
     final participants = json['participants'];

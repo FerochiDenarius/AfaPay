@@ -59,3 +59,4 @@ app.*.map.json
 service-account*.json
 node_modules/
 **/node_modules/
+AfaPayBackend/uploads/

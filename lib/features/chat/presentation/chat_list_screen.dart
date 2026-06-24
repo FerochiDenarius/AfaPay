@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../models/chat_models.dart';
 import '../repositories/chat_repository.dart';
+import '../services/chat_realtime_service.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key, this.initialTab = 0});
@@ -18,12 +21,16 @@ class _ChatListScreenState extends State<ChatListScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
   final _repository = ChatRepository();
+  final _realtime = ChatRealtimeService.instance;
   final _searchController = TextEditingController();
 
   bool _isLoading = true;
   String? _errorMessage;
   List<ChatConversation> _privateChats = const [];
   List<ChatConversation> _groups = const [];
+  Set<String> _onlineUserIds = const {};
+  StreamSubscription<Set<String>>? _onlineUsersSubscription;
+  StreamSubscription<ChatPresenceEvent>? _presenceSubscription;
 
   @override
   void initState() {
@@ -33,14 +40,27 @@ class _ChatListScreenState extends State<ChatListScreen>
       vsync: this,
       initialIndex: widget.initialTab.clamp(0, 1),
     );
+    _connectRealtime();
     _loadChats();
   }
 
   @override
   void dispose() {
+    _onlineUsersSubscription?.cancel();
+    _presenceSubscription?.cancel();
     _tabController.dispose();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _connectRealtime() {
+    _onlineUsersSubscription = _realtime.onlineUsersStream.listen(
+      _applyOnlineUsers,
+    );
+    _presenceSubscription = _realtime.presenceStream.listen(
+      _applyPresenceEvent,
+    );
+    unawaited(_realtime.connect());
   }
 
   Future<void> _loadChats() async {
@@ -55,10 +75,11 @@ class _ChatListScreenState extends State<ChatListScreen>
       ]);
       if (!mounted) return;
       setState(() {
-        _privateChats = results[0];
+        _privateChats = _applyOnlineUsersToChats(results[0], _onlineUserIds);
         _groups = results[1];
         _isLoading = false;
       });
+      _realtime.requestOnlineUsers();
     } on ChatAuthExpiredException {
       if (mounted) context.go('/login');
     } on ChatApiException catch (error) {
@@ -74,6 +95,59 @@ class _ChatListScreenState extends State<ChatListScreen>
         _errorMessage = 'Unable to load chats.';
       });
     }
+  }
+
+  void _applyOnlineUsers(Set<String> userIds) {
+    if (!mounted) return;
+    setState(() {
+      _onlineUserIds = userIds;
+      _privateChats = _applyOnlineUsersToChats(_privateChats, userIds);
+    });
+  }
+
+  void _applyPresenceEvent(ChatPresenceEvent event) {
+    if (!mounted) return;
+    setState(() {
+      final nextOnlineUserIds = Set<String>.of(_onlineUserIds);
+      if (event.isOnline) {
+        nextOnlineUserIds.add(event.userId);
+      } else {
+        nextOnlineUserIds.remove(event.userId);
+      }
+      _onlineUserIds = nextOnlineUserIds;
+      _privateChats = _privateChats
+          .map((chat) => _applyPresenceToChat(chat, event))
+          .toList();
+    });
+  }
+
+  List<ChatConversation> _applyOnlineUsersToChats(
+    List<ChatConversation> chats,
+    Set<String> userIds,
+  ) {
+    return chats.map((chat) {
+      final participant = chat.participant;
+      if (participant == null) return chat;
+      return chat.copyWith(
+        participant: participant.copyWith(
+          isOnline: userIds.contains(participant.id),
+        ),
+      );
+    }).toList();
+  }
+
+  ChatConversation _applyPresenceToChat(
+    ChatConversation chat,
+    ChatPresenceEvent event,
+  ) {
+    final participant = chat.participant;
+    if (participant == null || participant.id != event.userId) return chat;
+    return chat.copyWith(
+      participant: participant.copyWith(
+        isOnline: event.isOnline,
+        lastSeen: event.lastSeen,
+      ),
+    );
   }
 
   List<ChatConversation> _filter(List<ChatConversation> chats) {

@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const http = require('http');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -9,6 +10,8 @@ const afapayAuthRoutes = require('./routes/afapayAuth.routes');
 const afapayChatRoutes = require('./routes/afapayChat.routes');
 const afapayDashboardRoutes = require('./routes/afapayDashboard.routes');
 const afapaySecurityRoutes = require('./routes/afapaySecurity.routes');
+const { initAfaPayRealtime } = require('./services/afapayRealtime.service');
+const mediaStorage = require('./services/mediaStorage.service');
 
 const app = express();
 
@@ -33,6 +36,14 @@ app.use(
   }),
 );
 app.use(express.json({ limit: '256kb' }));
+app.use(
+  '/media',
+  express.static(mediaStorage.localMediaRoot(), {
+    fallthrough: false,
+    immutable: true,
+    maxAge: '30d',
+  }),
+);
 
 app.get('/health', (_req, res) => {
   res.status(mongoose.connection.readyState === 1 ? 200 : 503).json({
@@ -70,7 +81,9 @@ async function start() {
   });
 
   const port = Number(process.env.PORT || 8080);
-  app.listen(port, '0.0.0.0', () => {
+  const server = http.createServer(app);
+  initAfaPayRealtime(server);
+  server.listen(port, '0.0.0.0', () => {
     console.log(`[AfaPay] API listening on port ${port}`);
   });
 }

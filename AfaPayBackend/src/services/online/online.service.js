@@ -112,11 +112,14 @@ async function markUserOnline({ io, User, socket, userId }) {
 
   console.log(`🟢 User ${normalizedUserId} is online (${socketIds.size} active socket(s))`);
 
-  await User.findByIdAndUpdate(normalizedUserId, { online: true, lastSeen: new Date() }, { new: true });
+  const lastSeen = new Date();
+  await User.findByIdAndUpdate(normalizedUserId, { online: true, lastSeen }, { new: true });
   io.emit('getOnlineUsers', await getOnlineUserIdsAsync());
   io.emit('userStatusChanged', {
     userId: normalizedUserId,
     isOnline: true,
+    online: true,
+    lastSeen: lastSeen.toISOString(),
     statusText: 'Online',
   });
 }
@@ -181,12 +184,15 @@ async function markUserOffline({
         .catch((error) => console.error('[Presence] Redis offline update failed:', error.message));
     }
 
-    await User.findByIdAndUpdate(normalizedUserId, { online: false, lastSeen: new Date() }, { new: true });
+    const lastSeen = new Date();
+    await User.findByIdAndUpdate(normalizedUserId, { online: false, lastSeen }, { new: true });
 
     io.emit('getOnlineUsers', await getOnlineUserIdsAsync());
     io.emit('userStatusChanged', {
       userId: normalizedUserId,
       isOnline: false,
+      online: false,
+      lastSeen: lastSeen.toISOString(),
       statusText: 'Offline',
     });
   };

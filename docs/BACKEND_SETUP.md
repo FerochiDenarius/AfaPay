@@ -27,6 +27,7 @@ GET  /api/user/profile                     (JWT required)
 GET  /api/wallet/balance                   (JWT required)
 GET  /api/transactions/recent              (JWT required)
 GET  /api/notifications/unread-count       (JWT required)
+POST /api/messages/upload                  (JWT required, multipart media)
 ```
 
 Registration, login, and email verification use the AfaPay `AfaPayUser`
@@ -46,6 +47,10 @@ data is read from `afapay_users`; wallet, recent transactions, and unread
 notifications currently return safe defaults until those product modules are
 implemented.
 
+Chat media uploads are wired through the shared media storage service. Local
+development can use disk storage, while production should use the AfaPay Google
+Cloud Storage bucket documented in [GOOGLE_CLOUD_STORAGE.md](GOOGLE_CLOUD_STORAGE.md).
+
 ## Required Server Environment
 
 Copy `AfaPayBackend/.env.example` to the deployment environment and set real
@@ -59,6 +64,11 @@ values for:
 - `RESEND_API_KEY`
 - `EMAIL_FROM="AfaPay <noreply@afapay.xyz>"`
 - `CORS_ORIGIN=https://afapay.xyz,https://www.afapay.xyz`
+- `MEDIA_STORAGE_PROVIDER=gcs`
+- `GOOGLE_CLOUD_PROJECT=afapay`
+- `GCS_MEDIA_BUCKET=afapay-media`
+- `GCS_PUBLIC_BASE_URL=https://storage.googleapis.com/afapay-media`
+- `GCS_SERVICE_ACCOUNT_JSON`
 
 Do not commit the real `.env` file.
 

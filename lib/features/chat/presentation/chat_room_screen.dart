@@ -6,9 +6,15 @@ import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../models/chat_media_draft.dart';
 import '../models/chat_models.dart';
+import '../models/chat_room_settings.dart';
 import '../repositories/chat_repository.dart';
+import '../services/chat_realtime_service.dart';
 import 'chat_media_picker_screen.dart';
+import 'widgets/chat_room_menu.dart';
 import 'widgets/chat_header.dart';
+import 'widgets/chat_theme_sheet.dart';
+import 'widgets/chat_wallpaper.dart';
+import 'widgets/disappearing_messages_sheet.dart';
 import 'widgets/message_bubble.dart';
 import 'widgets/message_input_bar.dart';
 
@@ -27,6 +33,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _inputFocusNode = FocusNode();
   final _scrollController = ScrollController();
   final _repository = ChatRepository();
+  final _realtime = ChatRealtimeService.instance;
 
   bool _showEmojiMenu = false;
   bool _showAttachmentMenu = false;
@@ -35,11 +42,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   String? _messageError;
   String? _currentUserId;
   Timer? _presenceTimer;
+  StreamSubscription<Set<String>>? _onlineUsersSubscription;
+  StreamSubscription<ChatPresenceEvent>? _presenceSubscription;
+  ChatRoomSettings _settings = ChatRoomSettings.defaults;
   ChatConversation? _conversation;
   late List<_DisplayChatMessage> _messages;
 
   bool get _isPreviewRoom =>
       widget.roomId == 'preview' || widget.roomId.isEmpty;
+
+  bool get _hasCustomRoomAppearance =>
+      _settings.theme != ChatThemeOption.gold ||
+      _settings.wallpaper != ChatWallpaperOption.midnight;
 
   @override
   void initState() {
@@ -48,11 +62,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _messages = _isPreviewRoom
         ? List.of(_mockMessages)
         : <_DisplayChatMessage>[];
+    if (!_isPreviewRoom) {
+      _connectRealtime();
+    }
     _presenceTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _refreshPresence(),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadSettings();
       _refreshPresence();
       _loadMessages();
     });
@@ -61,10 +79,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void dispose() {
     _presenceTimer?.cancel();
+    _onlineUsersSubscription?.cancel();
+    _presenceSubscription?.cancel();
     _messageController.dispose();
     _inputFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _connectRealtime() {
+    _onlineUsersSubscription = _realtime.onlineUsersStream.listen(
+      _applyOnlineUsers,
+    );
+    _presenceSubscription = _realtime.presenceStream.listen(
+      _applyPresenceEvent,
+    );
+    unawaited(_realtime.connect());
   }
 
   void _showToast(String label) {
@@ -81,6 +111,325 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(label)));
+  }
+
+  Future<void> _loadSettings() async {
+    if (_isPreviewRoom) return;
+    try {
+      final settings = await _repository.fetchRoomSettings(widget.roomId);
+      if (!mounted) return;
+      setState(() => _settings = settings);
+    } on ChatAuthExpiredException {
+      if (mounted) context.go('/login');
+    } on Object {
+      // Settings are not critical for opening the room.
+    }
+  }
+
+  Future<void> _saveSettings(
+    ChatRoomSettings settings, {
+    bool reloadMessages = false,
+  }) async {
+    setState(() => _settings = settings);
+    if (_isPreviewRoom) return;
+
+    try {
+      final saved = await _repository.saveRoomSettings(
+        roomId: widget.roomId,
+        settings: settings,
+      );
+      if (!mounted) return;
+      setState(() => _settings = saved);
+      if (reloadMessages) await _loadMessages();
+    } on ChatAuthExpiredException {
+      if (mounted) context.go('/login');
+    } on ChatApiException catch (error) {
+      _showTemporaryAction(error.message);
+      unawaited(_loadSettings());
+    } on Object {
+      _showTemporaryAction('Unable to save chat settings.');
+      unawaited(_loadSettings());
+    }
+  }
+
+  Future<void> _showRoomMenu() {
+    final conversation = _conversation ?? widget.conversation;
+    final contactAvailable =
+        !_isPreviewRoom &&
+        conversation?.isGroup == false &&
+        conversation?.participant != null;
+
+    return showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: context.chatColors.menuSurface,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 18),
+          children: [
+            _roomMenuTile(
+              context,
+              ChatRoomMenuAction.viewContact,
+              conversation?.isGroup == true
+                  ? Icons.groups_rounded
+                  : Icons.person_rounded,
+              conversation?.isGroup == true ? 'View group' : 'View contact',
+            ),
+            _roomMenuTile(
+              context,
+              ChatRoomMenuAction.chatTheme,
+              Icons.palette_outlined,
+              'Chat theme',
+            ),
+            _roomMenuTile(
+              context,
+              ChatRoomMenuAction.block,
+              Icons.block_rounded,
+              'Block',
+              enabled: contactAvailable,
+            ),
+            _roomMenuTile(
+              context,
+              ChatRoomMenuAction.mute,
+              _settings.muted
+                  ? Icons.notifications_active_outlined
+                  : Icons.notifications_off_outlined,
+              _settings.muted ? 'Unmute notifications' : 'Mute notifications',
+            ),
+            _roomMenuTile(
+              context,
+              ChatRoomMenuAction.disappearingMessages,
+              Icons.timer_outlined,
+              'Disappearing messages',
+            ),
+            _roomMenuTile(
+              context,
+              ChatRoomMenuAction.report,
+              Icons.flag_outlined,
+              'Report',
+              enabled: contactAvailable,
+            ),
+            _roomMenuTile(
+              context,
+              ChatRoomMenuAction.newGroup,
+              Icons.group_add_outlined,
+              'New group',
+            ),
+            _roomMenuTile(
+              context,
+              ChatRoomMenuAction.clearChat,
+              Icons.delete_sweep_outlined,
+              'Clear chat',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _roomMenuTile(
+    BuildContext context,
+    ChatRoomMenuAction action,
+    IconData icon,
+    String label, {
+    bool enabled = true,
+  }) {
+    final colors = context.chatColors;
+    return ListTile(
+      enabled: enabled,
+      leading: Icon(icon, color: enabled ? colors.accent : colors.mutedIcon),
+      title: Text(label),
+      onTap: enabled
+          ? () {
+              Navigator.pop(context);
+              _handleRoomMenuAction(action);
+            }
+          : null,
+    );
+  }
+
+  void _handleRoomMenuAction(ChatRoomMenuAction action) {
+    switch (action) {
+      case ChatRoomMenuAction.viewContact:
+        _showContactDetails();
+      case ChatRoomMenuAction.chatTheme:
+        showChatThemeSheet(
+          context: context,
+          settings: _settings,
+          onChanged: (settings) => unawaited(_saveSettings(settings)),
+        );
+      case ChatRoomMenuAction.block:
+        unawaited(_blockContact());
+      case ChatRoomMenuAction.mute:
+        unawaited(_saveSettings(_settings.copyWith(muted: !_settings.muted)));
+      case ChatRoomMenuAction.disappearingMessages:
+        showDisappearingMessagesSheet(
+          context: context,
+          settings: _settings,
+          onChanged: (settings) =>
+              unawaited(_saveSettings(settings, reloadMessages: true)),
+        );
+      case ChatRoomMenuAction.report:
+        unawaited(_reportContact());
+      case ChatRoomMenuAction.newGroup:
+        context.go('/group-chat');
+      case ChatRoomMenuAction.clearChat:
+        unawaited(_clearChat());
+    }
+  }
+
+  void _showContactDetails() {
+    final conversation = _conversation ?? widget.conversation;
+    final title = conversation?.title ?? 'Chat';
+    final status = conversation?.participant?.isOnline == true
+        ? 'Online'
+        : 'Offline';
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(conversation?.isGroup == true ? 'Group chat' : status),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _clearChat() async {
+    final confirmed = await _confirmDestructiveAction(
+      title: 'Clear chat?',
+      message: 'Messages in this chat will be hidden for you.',
+      actionLabel: 'Clear',
+    );
+    if (confirmed != true) return;
+
+    try {
+      final settings = await _repository.clearChat(widget.roomId);
+      if (!mounted) return;
+      setState(() {
+        _settings = settings;
+        _messages = const [];
+      });
+      _showTemporaryAction('Chat cleared.');
+    } on ChatAuthExpiredException {
+      if (mounted) context.go('/login');
+    } on ChatApiException catch (error) {
+      _showTemporaryAction(error.message);
+    } on Object {
+      _showTemporaryAction('Unable to clear chat.');
+    }
+  }
+
+  Future<void> _blockContact() async {
+    final participant = (_conversation ?? widget.conversation)?.participant;
+    if (participant == null) return;
+    final confirmed = await _confirmDestructiveAction(
+      title: 'Block ${participant.username}?',
+      message: 'They will not be able to message you in this chat.',
+      actionLabel: 'Block',
+    );
+    if (confirmed != true) return;
+
+    try {
+      await _repository.blockContact(participant.id);
+      if (!mounted) return;
+      _showTemporaryAction('${participant.username} blocked.');
+      context.go('/chats');
+    } on ChatAuthExpiredException {
+      if (mounted) context.go('/login');
+    } on ChatApiException catch (error) {
+      _showTemporaryAction(error.message);
+    } on Object {
+      _showTemporaryAction('Unable to block contact.');
+    }
+  }
+
+  Future<void> _reportContact() async {
+    final participant = (_conversation ?? widget.conversation)?.participant;
+    if (participant == null) return;
+    final reason = await _showReportDialog(participant.username);
+    if (reason == null) return;
+
+    try {
+      await _repository.reportContact(
+        userId: participant.id,
+        roomId: widget.roomId,
+        reason: reason,
+      );
+      if (!mounted) return;
+      _showTemporaryAction('Report sent.');
+    } on ChatAuthExpiredException {
+      if (mounted) context.go('/login');
+    } on ChatApiException catch (error) {
+      _showTemporaryAction(error.message);
+    } on Object {
+      _showTemporaryAction('Unable to report contact.');
+    }
+  }
+
+  Future<bool?> _confirmDestructiveAction({
+    required String title,
+    required String message,
+    required String actionLabel,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<String?> _showReportDialog(String username) {
+    final controller = TextEditingController(text: 'Reported from chat');
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Report $username'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 3,
+          maxLines: 5,
+          decoration: const InputDecoration(
+            hintText: 'Reason',
+            alignLabelWithHint: true,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final reason = controller.text.trim();
+              Navigator.pop(
+                context,
+                reason.isEmpty ? 'Reported from chat' : reason,
+              );
+            },
+            child: const Text('Report'),
+          ),
+        ],
+      ),
+    ).whenComplete(controller.dispose);
   }
 
   Future<void> _loadMessages() async {
@@ -190,12 +539,45 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       for (final room in rooms) {
         if (room.id == widget.roomId) {
           setState(() => _conversation = room);
+          _realtime.requestOnlineUsers();
           return;
         }
       }
     } on Object {
       // Presence refresh is best-effort; chat UI should remain usable offline.
     }
+  }
+
+  void _applyOnlineUsers(Set<String> userIds) {
+    final conversation = _conversation ?? widget.conversation;
+    final participant = conversation?.participant;
+    if (!mounted || conversation == null || participant == null) return;
+    setState(() {
+      _conversation = conversation.copyWith(
+        participant: participant.copyWith(
+          isOnline: userIds.contains(participant.id),
+        ),
+      );
+    });
+  }
+
+  void _applyPresenceEvent(ChatPresenceEvent event) {
+    final conversation = _conversation ?? widget.conversation;
+    final participant = conversation?.participant;
+    if (!mounted ||
+        conversation == null ||
+        participant == null ||
+        participant.id != event.userId) {
+      return;
+    }
+    setState(() {
+      _conversation = conversation.copyWith(
+        participant: participant.copyWith(
+          isOnline: event.isOnline,
+          lastSeen: event.lastSeen,
+        ),
+      );
+    });
   }
 
   void _markMessageFailed(String messageId) {
@@ -316,83 +698,91 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     return Scaffold(
       resizeToAvoidBottomInset: true,
       backgroundColor: colors.background,
-      body: DecoratedBox(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [colors.background, colors.backgroundSecondary],
-          ),
-        ),
-        child: SafeArea(
-          child: Column(
-            children: [
-              ChatHeader(
-                username: title,
-                avatarUrl: avatarUrl,
-                isOnline: isOnline,
-                onBack: () {
-                  if (context.canPop()) {
-                    context.pop();
-                  } else {
-                    context.go('/chats');
-                  }
-                },
-                onCall: () => context.push('/voice-call'),
-                onVideoCall: () => context.push('/video-call'),
-                onMore: () => _showTemporaryAction('More'),
-              ),
-              Expanded(
-                child: _MessageArea(
-                  messages: _messages,
-                  isLoading: _isLoadingMessages,
-                  errorMessage: _messageError,
-                  onRetry: _loadMessages,
-                  scrollController: _scrollController,
-                  onTap: () {
-                    if (_showEmojiMenu || _showAttachmentMenu) {
-                      setState(() {
-                        _showEmojiMenu = false;
-                        _showAttachmentMenu = false;
-                      });
-                    }
-                    _inputFocusNode.unfocus();
-                  },
+      body: Stack(
+        children: [
+          if (_hasCustomRoomAppearance)
+            ChatWallpaperBackdrop(settings: _settings)
+          else
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [colors.background, colors.backgroundSecondary],
                 ),
               ),
-              MessageInputBar(
-                controller: _messageController,
-                focusNode: _inputFocusNode,
-                showEmojiMenu: _showEmojiMenu,
-                showAttachmentMenu: _showAttachmentMenu,
-                onAttachmentPressed: () {
-                  setState(() {
-                    _showAttachmentMenu = !_showAttachmentMenu;
-                    _showEmojiMenu = false;
-                  });
-                },
-                onCameraPressed: _openMediaPicker,
-                onEmojiButtonPressed: () {
-                  setState(() {
-                    _showEmojiMenu = !_showEmojiMenu;
-                    _showAttachmentMenu = false;
-                  });
-                },
-                onDocument: () => _showToast('Document'),
-                onGallery: _openMediaPicker,
-                onContact: () => _showToast('Contact'),
-                onLocation: () => _showToast('Location'),
-                onPoll: () => _showToast('Poll'),
-                onEvent: () => _showToast('Event'),
-                onEmoji: () => _showToast('Emoji'),
-                onGif: () => _showToast('GIF'),
-                onSticker: () => _showToast('Sticker'),
-                onSend: _sendMessage,
-                onVoiceMessage: () => _showToast('Voice message'),
-              ),
-            ],
+              child: const SizedBox.expand(),
+            ),
+          SafeArea(
+            child: Column(
+              children: [
+                ChatHeader(
+                  username: title,
+                  avatarUrl: avatarUrl,
+                  isOnline: isOnline,
+                  onBack: () {
+                    if (context.canPop()) {
+                      context.pop();
+                    } else {
+                      context.go('/chats');
+                    }
+                  },
+                  onCall: () => context.push('/voice-call'),
+                  onVideoCall: () => context.push('/video-call'),
+                  onMore: _showRoomMenu,
+                ),
+                Expanded(
+                  child: _MessageArea(
+                    messages: _messages,
+                    isLoading: _isLoadingMessages,
+                    errorMessage: _messageError,
+                    onRetry: _loadMessages,
+                    scrollController: _scrollController,
+                    onTap: () {
+                      if (_showEmojiMenu || _showAttachmentMenu) {
+                        setState(() {
+                          _showEmojiMenu = false;
+                          _showAttachmentMenu = false;
+                        });
+                      }
+                      _inputFocusNode.unfocus();
+                    },
+                  ),
+                ),
+                MessageInputBar(
+                  controller: _messageController,
+                  focusNode: _inputFocusNode,
+                  showEmojiMenu: _showEmojiMenu,
+                  showAttachmentMenu: _showAttachmentMenu,
+                  onAttachmentPressed: () {
+                    setState(() {
+                      _showAttachmentMenu = !_showAttachmentMenu;
+                      _showEmojiMenu = false;
+                    });
+                  },
+                  onCameraPressed: _openMediaPicker,
+                  onEmojiButtonPressed: () {
+                    setState(() {
+                      _showEmojiMenu = !_showEmojiMenu;
+                      _showAttachmentMenu = false;
+                    });
+                  },
+                  onDocument: () => _showToast('Document'),
+                  onGallery: _openMediaPicker,
+                  onContact: () => _showToast('Contact'),
+                  onLocation: () => _showToast('Location'),
+                  onPoll: () => _showToast('Poll'),
+                  onEvent: () => _showToast('Event'),
+                  onEmoji: () => _showToast('Emoji'),
+                  onGif: () => _showToast('GIF'),
+                  onSticker: () => _showToast('Sticker'),
+                  onSend: _sendMessage,
+                  onVoiceMessage: () => _showToast('Voice message'),
+                ),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

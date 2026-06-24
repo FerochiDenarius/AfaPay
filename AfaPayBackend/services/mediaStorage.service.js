@@ -1,15 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const { Readable } = require('stream');
-const axios = require('axios');
-const FormData = require('form-data');
-const { cloudinary } = require('../config/cloudinary');
 
-const DEFAULT_BUCKET = 'yenkasa-media';
-const DEFAULT_GCS_PROXY_UPLOAD_URL = 'https://yenkasa-chat-backend-backup-496173204476.europe-west1.run.app/api/media-proxy/upload';
 const PROVIDERS = {
   GCS: 'gcs',
   CLOUDINARY: 'cloudinary',
+  LOCAL: 'local',
 };
 
 const BUCKET_FOLDERS = {
@@ -23,17 +19,21 @@ const BUCKET_FOLDERS = {
 };
 
 function configuredProvider() {
-  return String(process.env.MEDIA_STORAGE_PROVIDER || process.env.PRIMARY_MEDIA_STORAGE || PROVIDERS.GCS)
+  const explicit = String(process.env.MEDIA_STORAGE_PROVIDER || process.env.PRIMARY_MEDIA_STORAGE || '')
     .trim()
     .toLowerCase();
+  if (explicit) return explicit;
+  return hasGcsConfig() ? PROVIDERS.GCS : PROVIDERS.LOCAL;
 }
 
 function gcsBucketName() {
-  return process.env.GCS_MEDIA_BUCKET || process.env.GOOGLE_CLOUD_STORAGE_BUCKET || DEFAULT_BUCKET;
+  return String(process.env.GCS_MEDIA_BUCKET || process.env.GOOGLE_CLOUD_STORAGE_BUCKET || '').trim();
 }
 
 function publicBaseUrl() {
-  return String(process.env.GCS_PUBLIC_BASE_URL || `https://storage.googleapis.com/${gcsBucketName()}`)
+  const baseUrl = process.env.GCS_PUBLIC_BASE_URL ||
+    (gcsBucketName() ? `https://storage.googleapis.com/${gcsBucketName()}` : '');
+  return String(baseUrl)
     .replace(/\/+$/, '');
 }
 
@@ -48,7 +48,7 @@ function runningOnGoogleRuntime() {
 function gcsProxyUploadUrl() {
   const configured = process.env.MEDIA_STORAGE_GCS_PROXY_URL || process.env.GCS_MEDIA_PROXY_URL;
   if (configured) return String(configured).trim();
-  return runningOnGoogleRuntime() ? '' : DEFAULT_GCS_PROXY_UPLOAD_URL;
+  return '';
 }
 
 function mediaProxySecret() {
@@ -67,6 +67,13 @@ function hasCloudinaryConfig() {
     process.env.CLOUDINARY_API_KEY &&
     process.env.CLOUDINARY_API_SECRET
   );
+}
+
+function loadCloudinary() {
+  if (!hasCloudinaryConfig()) {
+    throw new Error('Cloudinary media fallback is not configured.');
+  }
+  return require('../config/cloudinary').cloudinary;
 }
 
 function isImage(mimeType = '') {
@@ -138,15 +145,27 @@ function fileToStream(file) {
 
 function cloudinaryFolder(folder = 'posts') {
   const map = {
-    profiles: process.env.CLOUDINARY_PROFILE_FOLDER || 'yenkasa/profile',
-    posts: process.env.CLOUDINARY_POSTS_FOLDER || 'yenkasachat/posts',
-    videos: process.env.CLOUDINARY_VIDEOS_FOLDER || 'yenkasachat/posts',
-    communities: process.env.CLOUDINARY_GROUP_IMAGE_FOLDER || 'yenkasa/chat/groups',
-    livestreams: process.env.CLOUDINARY_LIVESTREAM_FOLDER || 'yenkasa/livestreams',
-    chat: process.env.CLOUDINARY_CHAT_MEDIA_FOLDER || 'yenkasa/chat/media',
-    store: process.env.CLOUDINARY_STORE_FOLDER || 'yenkasa/store',
+    profiles: process.env.CLOUDINARY_PROFILE_FOLDER || 'afapay/profiles',
+    posts: process.env.CLOUDINARY_POSTS_FOLDER || 'afapay/posts',
+    videos: process.env.CLOUDINARY_VIDEOS_FOLDER || 'afapay/videos',
+    communities: process.env.CLOUDINARY_GROUP_IMAGE_FOLDER || 'afapay/groups',
+    livestreams: process.env.CLOUDINARY_LIVESTREAM_FOLDER || 'afapay/livestreams',
+    chat: process.env.CLOUDINARY_CHAT_MEDIA_FOLDER || 'afapay/chat',
+    store: process.env.CLOUDINARY_STORE_FOLDER || 'afapay/store',
   };
-  return map[folder] || `yenkasa/${folder}`;
+  return map[folder] || `afapay/${folder}`;
+}
+
+function localMediaRoot() {
+  return path.resolve(
+    process.env.LOCAL_MEDIA_ROOT || path.join(__dirname, '..', 'uploads', 'media'),
+  );
+}
+
+function localPublicBaseUrl() {
+  const apiBase = String(process.env.API_PUBLIC_URL || `http://localhost:${process.env.PORT || 8080}`)
+    .replace(/\/+$/, '');
+  return String(process.env.LOCAL_MEDIA_PUBLIC_BASE_URL || `${apiBase}/media`).replace(/\/+$/, '');
 }
 
 async function uploadToGcs(file, options = {}) {
@@ -220,6 +239,8 @@ async function uploadToGcsProxy(file, options = {}) {
     throw new Error('GCS media proxy secret is not configured.');
   }
 
+  const axios = require('axios');
+  const FormData = require('form-data');
   const buffer = await fileToBuffer(file);
   const form = new FormData();
   form.append('file', buffer, {
@@ -251,10 +272,7 @@ async function uploadToGcsProxy(file, options = {}) {
 }
 
 function uploadToCloudinary(file, options = {}) {
-  if (!hasCloudinaryConfig()) {
-    return Promise.reject(new Error('Cloudinary media fallback is not configured.'));
-  }
-
+  const cloudinary = loadCloudinary();
   const folder = cloudinaryFolder(normalizeFolder(options.folder || 'posts'));
   const resourceType = options.resourceType || inferResourceType(file, options.type);
 
@@ -290,10 +308,43 @@ function uploadToCloudinary(file, options = {}) {
   });
 }
 
+async function uploadToLocal(file, options = {}) {
+  const objectName = options.objectName || gcsObjectName(file, options);
+  const normalizedObjectName = objectName
+    .split('/')
+    .map((segment) => sanitizeSegment(segment, 'media'))
+    .join('/');
+  const destination = path.join(localMediaRoot(), normalizedObjectName);
+  const root = localMediaRoot();
+  const resolved = path.resolve(destination);
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+    throw new Error('Invalid local media path.');
+  }
+
+  const buffer = await fileToBuffer(file);
+  await fs.promises.mkdir(path.dirname(resolved), { recursive: true });
+  await fs.promises.writeFile(resolved, buffer);
+
+  const url = `${localPublicBaseUrl()}/${encodeURI(normalizedObjectName).replace(/%2F/g, '/')}`;
+  return {
+    provider: PROVIDERS.LOCAL,
+    key: normalizedObjectName,
+    public_id: normalizedObjectName,
+    secure_url: url,
+    url,
+    bytes: Number(file.size || buffer.length || 0),
+    resource_type: inferResourceType(file, options.type),
+    original_filename: file.originalname || '',
+  };
+}
+
 async function upload(file, options = {}) {
   const provider = configuredProvider();
   if (provider === PROVIDERS.CLOUDINARY) {
     return uploadToCloudinary(file, options);
+  }
+  if (provider === PROVIDERS.LOCAL) {
+    return uploadToLocal(file, options);
   }
 
   const proxyUrl = gcsProxyUploadUrl();
@@ -308,7 +359,11 @@ async function upload(file, options = {}) {
       console.warn('[MediaStorage] GCS upload failed; using GCS media proxy:', error.message);
       return uploadToGcsProxy(file, options);
     }
-    if (String(process.env.MEDIA_STORAGE_CLOUDINARY_FALLBACK || 'true').toLowerCase() === 'false') {
+    if (String(process.env.MEDIA_STORAGE_LOCAL_FALLBACK || 'true').toLowerCase() !== 'false') {
+      console.warn('[MediaStorage] GCS upload failed; using local media fallback:', error.message);
+      return uploadToLocal(file, options);
+    }
+    if (String(process.env.MEDIA_STORAGE_CLOUDINARY_FALLBACK || 'false').toLowerCase() === 'false') {
       throw error;
     }
     console.warn('[MediaStorage] GCS upload failed; using Cloudinary fallback:', error.message);
@@ -317,7 +372,8 @@ async function upload(file, options = {}) {
 }
 
 function publicUrl(key) {
-  return `${publicBaseUrl()}/${String(key || '').replace(/^\/+/, '')}`;
+  const baseUrl = configuredProvider() === PROVIDERS.LOCAL ? localPublicBaseUrl() : publicBaseUrl();
+  return `${baseUrl}/${String(key || '').replace(/^\/+/, '')}`;
 }
 
 module.exports = {
@@ -327,9 +383,12 @@ module.exports = {
   gcsBucketName,
   hasCloudinaryConfig,
   hasGcsConfig,
+  localMediaRoot,
+  localPublicBaseUrl,
   publicUrl,
   upload,
   uploadToCloudinary,
   uploadToGcs,
   uploadToGcsProxy,
+  uploadToLocal,
 };
