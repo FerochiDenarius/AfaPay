@@ -10,6 +10,8 @@ the behavior implemented, navigation decisions, tests, and device deployment.
 - Refactored the chat contacts/list screen to match the supplied light and dark
   references.
 - Added a large Chats header with a home action.
+- Added the supplied `logo.png` as a visible brand mark in the chat contacts
+  header.
 - Rebuilt the search field as a rounded themed container with search and filter
   controls.
 - Rebuilt the Private/Groups selector as a rounded segmented tab surface.
@@ -26,6 +28,8 @@ the behavior implemented, navigation decisions, tests, and device deployment.
 - Preserved existing repository calls for private chats, groups, user search,
   new private chat creation, and group creation.
 - Preserved the existing authenticated navigation behavior.
+- Regenerated Android and iOS launcher icon slots from the supplied
+  `appIcon.png` asset.
 
 ### Verification
 

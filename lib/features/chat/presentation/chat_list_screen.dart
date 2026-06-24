@@ -460,14 +460,46 @@ class _ChatListHeader extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(
-            'Chats',
-            style: TextStyle(
-              color: colors.primaryText,
-              fontSize: 40,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 0,
-            ),
+          child: Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  color: colors.glassSurface,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: colors.border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: colors.shadow,
+                      blurRadius: 14,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: ClipOval(
+                  child: Image.asset(
+                    'UIdesignImages/logo.png',
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Flexible(
+                child: Text(
+                  'Chats',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: colors.primaryText,
+                    fontSize: 40,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         IconButton(

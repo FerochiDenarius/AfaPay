@@ -25,7 +25,8 @@ boundaries.
 - Chat room UI refactor with dark/light themes, mock messages, reusable header,
   message bubble, emoji menu, attachment menu, and responsive input bar
 - Chat contacts/list page with light and dark themes, rounded search,
-  Private/Groups tabs, chat cards, floating new-chat action, and chat bottom nav
+  Private/Groups tabs, app logo header mark, chat cards, floating new-chat
+  action, and chat bottom nav
 - Chat gallery attachment launcher, image/video editor preview, caption entry,
   and backend-ready media send flow
 - Light and dark main dashboard themes
