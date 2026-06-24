@@ -604,7 +604,11 @@ router.post('/messages', requireAfaPayAuth, async (req, res) => {
   await room.save();
 
   const savedMessage = await Message.findById(message._id).populate('repliedTo').lean();
-  return res.status(201).json(await messageForClient(savedMessage || message));
+  const clientMessage = await messageForClient(savedMessage || message);
+  if (global.io) {
+    global.io.to(`chat:${room._id.toString()}`).emit('messageCreated', clientMessage);
+  }
+  return res.status(201).json(clientMessage);
 });
 
 router.post('/messages/:roomId/mark-as-read', requireAfaPayAuth, async (req, res) => {

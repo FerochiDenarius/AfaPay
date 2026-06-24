@@ -53,6 +53,13 @@ app.get('/health', (_req, res) => {
   });
 });
 
+app.get('/realtime/health', (_req, res) => {
+  res.status(global.io ? 200 : 503).json({
+    status: global.io ? 'ok' : 'socket_unavailable',
+    socketAttached: Boolean(global.io),
+  });
+});
+
 app.use('/api/afapay/auth', afapayAuthRoutes);
 app.use('/api/auth', afapayAuthRoutes);
 app.use('/api/security', afapaySecurityRoutes);

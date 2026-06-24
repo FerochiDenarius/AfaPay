@@ -5,6 +5,7 @@ import 'package:socket_io_client/socket_io_client.dart' as socket_io;
 
 import '../../../core/config/api_config.dart';
 import '../../../core/security/auth_token_storage.dart';
+import '../models/chat_models.dart';
 
 class ChatPresenceEvent {
   const ChatPresenceEvent({
@@ -29,6 +30,8 @@ class ChatRealtimeService with WidgetsBindingObserver {
   final String _baseUrl;
   final _onlineUsersController = StreamController<Set<String>>.broadcast();
   final _presenceController = StreamController<ChatPresenceEvent>.broadcast();
+  final _messageController = StreamController<ChatMessage>.broadcast();
+  final _joinedRoomIds = <String>{};
 
   socket_io.Socket? _socket;
   String? _activeToken;
@@ -36,6 +39,7 @@ class ChatRealtimeService with WidgetsBindingObserver {
 
   Stream<Set<String>> get onlineUsersStream => _onlineUsersController.stream;
   Stream<ChatPresenceEvent> get presenceStream => _presenceController.stream;
+  Stream<ChatMessage> get messageStream => _messageController.stream;
 
   bool get isConnected => _socket?.connected == true;
 
@@ -69,9 +73,13 @@ class ChatRealtimeService with WidgetsBindingObserver {
     nextSocket.onConnect((_) {
       nextSocket.emit('userConnected');
       nextSocket.emit('requestOnlineUsers');
+      for (final roomId in _joinedRoomIds) {
+        nextSocket.emit('joinChatRoom', {'roomId': roomId});
+      }
     });
     nextSocket.on('getOnlineUsers', _handleOnlineUsers);
     nextSocket.on('userStatusChanged', _handlePresenceEvent);
+    nextSocket.on('messageCreated', _handleMessageCreated);
     nextSocket.on('authError', (_) {
       disconnect(sendOffline: false);
     });
@@ -84,6 +92,26 @@ class ChatRealtimeService with WidgetsBindingObserver {
     final socket = _socket;
     if (socket?.connected == true) {
       socket!.emit('requestOnlineUsers');
+    }
+  }
+
+  void joinChatRoom(String roomId) {
+    final normalizedRoomId = roomId.trim();
+    if (normalizedRoomId.isEmpty) return;
+    _joinedRoomIds.add(normalizedRoomId);
+    final socket = _socket;
+    if (socket?.connected == true) {
+      socket!.emit('joinChatRoom', {'roomId': normalizedRoomId});
+    }
+  }
+
+  void leaveChatRoom(String roomId) {
+    final normalizedRoomId = roomId.trim();
+    if (normalizedRoomId.isEmpty) return;
+    _joinedRoomIds.remove(normalizedRoomId);
+    final socket = _socket;
+    if (socket?.connected == true) {
+      socket!.emit('leaveChatRoom', normalizedRoomId);
     }
   }
 
@@ -103,6 +131,7 @@ class ChatRealtimeService with WidgetsBindingObserver {
     socket
       ..off('getOnlineUsers')
       ..off('userStatusChanged')
+      ..off('messageCreated')
       ..off('authError')
       ..disconnect()
       ..dispose();
@@ -133,6 +162,14 @@ class ChatRealtimeService with WidgetsBindingObserver {
         lastSeen: DateTime.tryParse(data['lastSeen']?.toString() ?? ''),
       ),
     );
+  }
+
+  void _handleMessageCreated(Object? data) {
+    if (data is! Map) return;
+    final json = Map<String, dynamic>.from(data);
+    final message = ChatMessage.fromJson(json);
+    if (message.id.isEmpty || message.roomId.isEmpty) return;
+    _messageController.add(message);
   }
 
   void _ensureLifecycleObserver() {

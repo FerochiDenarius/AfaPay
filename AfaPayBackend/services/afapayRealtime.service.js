@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { Server } = require('socket.io');
 
+const ChatRoom = require('../models/afapayChatRoom.model');
 const User = require('../models/afapayUser.model');
 const onlineService = require('../src/services/online/online.service');
 
@@ -52,6 +53,7 @@ function initAfaPayRealtime(server) {
   });
 
   global.io = io;
+  console.log('[AfaPayRealtime] Socket.IO attached');
 
   io.on('connection', async (socket) => {
     const auth = verifySocketUser(socket);
@@ -98,6 +100,30 @@ function initAfaPayRealtime(server) {
       }).catch((error) => {
         console.error('[AfaPayRealtime] userOffline failed:', error.message);
       });
+    });
+
+    socket.on('joinChatRoom', async (payload = {}) => {
+      const roomId = String(payload?.roomId || payload || '').trim();
+      if (!roomId) return;
+
+      try {
+        const room = await ChatRoom.findOne({
+          _id: roomId,
+          participants: auth.userId,
+        })
+          .select('_id')
+          .lean();
+        if (!room) return;
+        socket.join(`chat:${room._id.toString()}`);
+      } catch (error) {
+        console.error('[AfaPayRealtime] joinChatRoom failed:', error.message);
+      }
+    });
+
+    socket.on('leaveChatRoom', (roomId) => {
+      const normalizedRoomId = String(roomId || '').trim();
+      if (!normalizedRoomId) return;
+      socket.leave(`chat:${normalizedRoomId}`);
     });
 
     socket.on('disconnect', async (reason) => {

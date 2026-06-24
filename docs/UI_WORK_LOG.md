@@ -3,6 +3,62 @@
 This file is updated after every completed UI task. It records what was built,
 the behavior implemented, navigation decisions, tests, and device deployment.
 
+## 2026-06-24 - Chat Presence and Room Settings Wiring
+
+### Chat Presence
+
+- Added a shared Flutter `ChatRealtimeService` using the existing Socket.IO
+  backend and stored AfaPay access token.
+- Wired chat list rows and the chat room header to live `getOnlineUsers` and
+  `userStatusChanged` events.
+- Kept the existing REST presence refresh as a best-effort fallback in the chat
+  room.
+- Extended backend `userStatusChanged` payloads with `online` and `lastSeen`
+  aliases so the Flutter status model can update from socket events.
+
+### Chat Settings
+
+- Reconnected the current chat room More menu to the existing AfaPay settings
+  endpoints.
+- Wired chat theme, wallpaper, mute, disappearing messages, clear chat, block,
+  and report actions through `ChatRepository`.
+- Clear chat now calls `/api/chatrooms/:roomId/clear` and immediately hides the
+  current local message list for that user.
+- Theme/wallpaper changes are saved to `/api/chatrooms/:roomId/settings` and
+  custom room appearance is applied without changing the default golden layout.
+
+### Verification
+
+- `flutter analyze`: passed.
+- `flutter test`: passed.
+- Backend `npm test`: passed.
+- Backend `node --check` for realtime/presence files: passed.
+- `flutter build apk`: passed, generated
+  `build/app/outputs/flutter-apk/app-release.apk`.
+- Release APK installed on ADB device `146353755V007782`.
+- Release APK installed and launched on OPPO `CPH2819`; app process
+  `com.example.afa_pay` was running after launch.
+- Added the missing Android `INTERNET` permission after login testing showed the
+  installed Android APK could not make backend requests.
+- Redeployed Railway service `AfaPay` after Railway login was refreshed;
+  `https://afapay.xyz/health` returned HTTP 200.
+- Rebuilt the release APK after the Android permission fix and reinstalled it
+  on the OPPO `CPH2819` and connected TECNO `146353755V007782` devices.
+- Corrected realtime deployment target from `afapayVariables` to the
+  `production` Railway environment, which owns `https://afapay.xyz`.
+- Added authenticated chat room socket joins and backend `messageCreated`
+  emission from the AfaPay `/api/messages` route.
+- Added Flutter realtime message listening so open chat rooms append incoming
+  `messageCreated` events from other participants.
+- Production realtime proof on `https://afapay.xyz`:
+  `/realtime/health` returned `{"status":"ok","socketAttached":true}`,
+  `/socket.io/?EIO=4&transport=polling` returned a Socket.IO `sid`, and
+  `AFAPAY_RUN_PRODUCTION_SMOKE=true node test/realtime.production-smoke.js`
+  passed after two throwaway users connected, appeared online, exchanged a
+  realtime `messageCreated`, and emitted/received an offline status event.
+- Rebuilt release APK after realtime message-client changes and installed it on
+  both TECNO `146353755V007782` and OPPO `CPH2819`.
+
 ## 2026-06-24 - Chat Room Bug Fixes and Compact Chat List
 
 ### Chat Room

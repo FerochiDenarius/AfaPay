@@ -44,6 +44,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Timer? _presenceTimer;
   StreamSubscription<Set<String>>? _onlineUsersSubscription;
   StreamSubscription<ChatPresenceEvent>? _presenceSubscription;
+  StreamSubscription<ChatMessage>? _messageSubscription;
   ChatRoomSettings _settings = ChatRoomSettings.defaults;
   ChatConversation? _conversation;
   late List<_DisplayChatMessage> _messages;
@@ -81,6 +82,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _presenceTimer?.cancel();
     _onlineUsersSubscription?.cancel();
     _presenceSubscription?.cancel();
+    _messageSubscription?.cancel();
+    if (!_isPreviewRoom) {
+      _realtime.leaveChatRoom(widget.roomId);
+    }
     _messageController.dispose();
     _inputFocusNode.dispose();
     _scrollController.dispose();
@@ -94,7 +99,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _presenceSubscription = _realtime.presenceStream.listen(
       _applyPresenceEvent,
     );
+    _messageSubscription = _realtime.messageStream.listen(
+      _applyRealtimeMessage,
+    );
     unawaited(_realtime.connect());
+    _realtime.joinChatRoom(widget.roomId);
   }
 
   void _showToast(String label) {
@@ -578,6 +587,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         ),
       );
     });
+  }
+
+  void _applyRealtimeMessage(ChatMessage message) {
+    if (!mounted || message.roomId != widget.roomId) return;
+    if (_messages.any((displayMessage) => displayMessage.id == message.id)) {
+      return;
+    }
+
+    final currentUserId = _currentUserId;
+    if (message.isMine(currentUserId)) return;
+
+    setState(() {
+      _messages = [
+        ..._messages,
+        _DisplayChatMessage.fromChatMessage(
+          message,
+          currentUserId: currentUserId,
+        ),
+      ];
+    });
+    _scrollToBottom();
+    unawaited(_repository.markAsRead(widget.roomId));
   }
 
   void _markMessageFailed(String messageId) {
