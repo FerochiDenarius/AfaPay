@@ -600,23 +600,74 @@ class _ChatSegmentedTabs extends StatelessWidget {
           ),
         ],
       ),
-      child: TabBar(
-        controller: controller,
-        dividerColor: Colors.transparent,
-        indicatorColor: colors.accent,
-        indicatorWeight: 3,
-        indicatorPadding: const EdgeInsets.symmetric(horizontal: 34),
-        labelColor: colors.accent,
-        unselectedLabelColor: colors.secondaryText,
-        labelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
-        unselectedLabelStyle: const TextStyle(
-          fontSize: 15,
-          fontWeight: FontWeight.w700,
+      child: AnimatedBuilder(
+        animation: controller,
+        builder: (context, _) {
+          return Row(
+            children: [
+              _SegmentedTabButton(
+                label: 'Private',
+                selected: controller.index == 0,
+                onTap: () => controller.animateTo(0),
+              ),
+              _SegmentedTabButton(
+                label: 'Groups',
+                selected: controller.index == 1,
+                onTap: () => controller.animateTo(1),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _SegmentedTabButton extends StatelessWidget {
+  const _SegmentedTabButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
+    return Expanded(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? colors.accent : colors.secondaryText,
+                fontSize: 15,
+                fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
+              ),
+            ),
+            Positioned(
+              left: 36,
+              right: 36,
+              bottom: 0,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                height: 3,
+                decoration: BoxDecoration(
+                  color: selected ? colors.accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+          ],
         ),
-        tabs: const [
-          Tab(text: 'Private'),
-          Tab(text: 'Groups'),
-        ],
       ),
     );
   }
