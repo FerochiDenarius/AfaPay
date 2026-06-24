@@ -69,6 +69,25 @@ void main() {
     expect(find.byTooltip('Send'), findsOneWidget);
   });
 
+  testWidgets('emoji menu stays closed until emoji button is tapped', (
+    tester,
+  ) async {
+    await setPhoneSurface(tester);
+    await tester.pumpWidget(const ChatRoomDarkPreview());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Emoji'), findsNothing);
+    expect(find.text('GIF'), findsNothing);
+    expect(find.text('Sticker'), findsNothing);
+
+    await tester.tap(find.byTooltip('Emoji, GIF, or sticker'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Emoji'), findsOneWidget);
+    expect(find.text('GIF'), findsOneWidget);
+    expect(find.text('Sticker'), findsOneWidget);
+  });
+
   testWidgets('send button appends typed mock message', (tester) async {
     await setPhoneSurface(tester);
     await tester.pumpWidget(const ChatRoomDarkPreview());

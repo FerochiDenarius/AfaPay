@@ -12,6 +12,7 @@ class MessageBubble extends StatelessWidget {
     required this.time,
     required this.isOutgoing,
     this.showReadReceipt = false,
+    this.deliveryStatus,
     this.mediaType,
     this.localMediaPath,
     this.assetMediaPath,
@@ -22,6 +23,7 @@ class MessageBubble extends StatelessWidget {
   final String time;
   final bool isOutgoing;
   final bool showReadReceipt;
+  final String? deliveryStatus;
   final ChatMediaType? mediaType;
   final String? localMediaPath;
   final String? assetMediaPath;
@@ -30,7 +32,7 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.chatColors;
-    final maxWidth = MediaQuery.sizeOf(context).width * 0.7;
+    final maxWidth = MediaQuery.sizeOf(context).width * 0.68;
 
     return Align(
       alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
@@ -39,14 +41,14 @@ class MessageBubble extends StatelessWidget {
         margin: EdgeInsets.only(
           top: 6,
           bottom: 6,
-          left: isOutgoing ? 46 : 0,
-          right: isOutgoing ? 0 : 46,
+          left: isOutgoing ? 54 : 0,
+          right: isOutgoing ? 0 : 54,
         ),
         padding: EdgeInsets.fromLTRB(
           hasMedia ? 6 : 18,
-          hasMedia ? 6 : 11,
-          hasMedia ? 6 : 16,
-          11,
+          hasMedia ? 6 : 10,
+          hasMedia ? 6 : 15,
+          10,
         ),
         decoration: BoxDecoration(
           color: isOutgoing ? colors.outgoingBubble : colors.incomingBubble,
@@ -86,7 +88,7 @@ class MessageBubble extends StatelessWidget {
                     color: isOutgoing
                         ? colors.onAccentText
                         : colors.primaryText,
-                    fontSize: 16,
+                    fontSize: 15,
                     height: 1.22,
                     fontWeight: FontWeight.w800,
                   ),
@@ -104,16 +106,15 @@ class MessageBubble extends StatelessWidget {
                       color: isOutgoing
                           ? colors.onAccentText.withValues(alpha: 0.7)
                           : colors.secondaryText,
-                      fontSize: 13,
+                      fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  if (showReadReceipt) ...[
+                  if (isOutgoing) ...[
                     const SizedBox(width: 8),
-                    Icon(
-                      Icons.done_all_rounded,
-                      size: 20,
-                      color: colors.readReceipt,
+                    _DeliveryIndicator(
+                      status: deliveryStatus,
+                      fallbackRead: showReadReceipt,
                     ),
                   ],
                 ],
@@ -130,6 +131,46 @@ class MessageBubble extends StatelessWidget {
       ((localMediaPath != null && localMediaPath!.isNotEmpty) ||
           (assetMediaPath != null && assetMediaPath!.isNotEmpty) ||
           (remoteMediaUrl != null && remoteMediaUrl!.isNotEmpty));
+}
+
+class _DeliveryIndicator extends StatelessWidget {
+  const _DeliveryIndicator({required this.status, required this.fallbackRead});
+
+  final String? status;
+  final bool fallbackRead;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+    final normalized = status?.toLowerCase().trim();
+
+    final IconData icon;
+    final Color color;
+    switch (normalized) {
+      case 'pending':
+        icon = Icons.schedule_rounded;
+        color = colors.onAccentText.withValues(alpha: 0.68);
+      case 'failed':
+        icon = Icons.error_outline_rounded;
+        color = colors.incomingBubbleBorder;
+      case 'read':
+        icon = Icons.done_all_rounded;
+        color = colors.readReceipt;
+      case 'delivered':
+        icon = Icons.done_all_rounded;
+        color = colors.onAccentText.withValues(alpha: 0.68);
+      case 'sent':
+        icon = Icons.done_rounded;
+        color = colors.onAccentText.withValues(alpha: 0.68);
+      default:
+        icon = fallbackRead ? Icons.done_all_rounded : Icons.done_rounded;
+        color = fallbackRead
+            ? colors.readReceipt
+            : colors.onAccentText.withValues(alpha: 0.68);
+    }
+
+    return Icon(icon, size: 17, color: color);
+  }
 }
 
 class _BubbleMediaPreview extends StatelessWidget {

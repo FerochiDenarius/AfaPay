@@ -113,6 +113,7 @@ class ChatMessage {
     this.mediaName,
     this.mediaMimeType,
     this.mediaSizeBytes = 0,
+    this.status,
     this.repliedTo,
     this.createdAt,
   });
@@ -130,6 +131,7 @@ class ChatMessage {
   final String? mediaName;
   final String? mediaMimeType;
   final int mediaSizeBytes;
+  final String? status;
   final ChatMessage? repliedTo;
   final DateTime? createdAt;
 
@@ -161,6 +163,7 @@ class ChatMessage {
       mediaName: _nullableString(json['mediaName']),
       mediaMimeType: _nullableString(json['mediaMimeType']),
       mediaSizeBytes: _int(json['mediaSizeBytes']),
+      status: _nullableString(json['status']),
       repliedTo: repliedTo is Map<String, dynamic>
           ? ChatMessage.fromJson(repliedTo)
           : null,

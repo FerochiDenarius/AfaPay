@@ -28,22 +28,34 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _scrollController = ScrollController();
   final _repository = ChatRepository();
 
-  bool _showEmojiMenu = true;
+  bool _showEmojiMenu = false;
   bool _showAttachmentMenu = false;
   bool _sendingMedia = false;
+  bool _isLoadingMessages = false;
+  String? _messageError;
+  String? _currentUserId;
   Timer? _presenceTimer;
   ChatConversation? _conversation;
-  List<_MockChatMessage> _messages = List.of(_mockMessages);
+  late List<_DisplayChatMessage> _messages;
+
+  bool get _isPreviewRoom =>
+      widget.roomId == 'preview' || widget.roomId.isEmpty;
 
   @override
   void initState() {
     super.initState();
     _conversation = widget.conversation;
+    _messages = _isPreviewRoom
+        ? List.of(_mockMessages)
+        : <_DisplayChatMessage>[];
     _presenceTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _refreshPresence(),
     );
-    WidgetsBinding.instance.addPostFrameCallback((_) => _refreshPresence());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refreshPresence();
+      _loadMessages();
+    });
   }
 
   @override
@@ -71,32 +83,100 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ..showSnackBar(SnackBar(content: Text(label)));
   }
 
-  void _sendMockMessage() {
+  Future<void> _loadMessages() async {
+    if (_isPreviewRoom) return;
+    setState(() {
+      _isLoadingMessages = true;
+      _messageError = null;
+    });
+    try {
+      final currentUserId = await _repository.currentUserId();
+      final messages = await _repository.fetchMessages(widget.roomId);
+      if (!mounted) return;
+      setState(() {
+        _currentUserId = currentUserId;
+        _messages = messages
+            .map(
+              (message) => _DisplayChatMessage.fromChatMessage(
+                message,
+                currentUserId: currentUserId,
+              ),
+            )
+            .toList();
+        _isLoadingMessages = false;
+      });
+      _scrollToBottom();
+      unawaited(_repository.markAsRead(widget.roomId));
+    } on ChatAuthExpiredException {
+      if (mounted) context.go('/login');
+    } on ChatApiException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingMessages = false;
+        _messageError = error.message;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingMessages = false;
+        _messageError = 'Unable to load messages.';
+      });
+    }
+  }
+
+  Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
+    final optimisticId = 'pending-${DateTime.now().microsecondsSinceEpoch}';
+    final optimisticMessage = _DisplayChatMessage(
+      id: optimisticId,
+      text: text,
+      time: TimeOfDay.now().format(context),
+      isOutgoing: true,
+      deliveryStatus: _isPreviewRoom ? 'read' : 'pending',
+    );
+
     setState(() {
-      _messages = [
-        ..._messages,
-        _MockChatMessage(
-          text: text,
-          time: TimeOfDay.now().format(context),
-          isOutgoing: true,
-        ),
-      ];
+      _messages = [..._messages, optimisticMessage];
       _messageController.clear();
       _showEmojiMenu = false;
       _showAttachmentMenu = false;
     });
+    _scrollToBottom();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
+    if (_isPreviewRoom) return;
+
+    try {
+      final currentUserId = _currentUserId ?? await _repository.currentUserId();
+      final sent = await _repository.sendMessage(
+        roomId: widget.roomId,
+        text: text,
       );
-    });
+      if (!mounted) return;
+      setState(() {
+        _currentUserId = currentUserId;
+        _messages = _messages
+            .map(
+              (message) => message.id == optimisticId
+                  ? _DisplayChatMessage.fromChatMessage(
+                      sent,
+                      currentUserId: currentUserId,
+                    )
+                  : message,
+            )
+            .toList();
+      });
+      _refreshPresence();
+    } on ChatAuthExpiredException {
+      if (mounted) context.go('/login');
+    } on ChatApiException catch (error) {
+      _markMessageFailed(optimisticId);
+      _showTemporaryAction(error.message);
+    } on Object {
+      _markMessageFailed(optimisticId);
+      _showTemporaryAction('Message failed to send.');
+    }
   }
 
   Future<void> _refreshPresence() async {
@@ -118,6 +198,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
+  void _markMessageFailed(String messageId) {
+    if (!mounted) return;
+    setState(() {
+      _messages = _messages
+          .map(
+            (message) => message.id == messageId
+                ? message.copyWith(deliveryStatus: 'failed')
+                : message,
+          )
+          .toList();
+    });
+  }
+
   Future<void> _openMediaPicker() async {
     setState(() {
       _showAttachmentMenu = false;
@@ -137,13 +230,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<void> _sendMediaDraft(ChatMediaDraft draft) async {
     if (_sendingMedia) return;
     final now = TimeOfDay.now().format(context);
-    final localMessage = _MockChatMessage(
+    final localId = 'media-${DateTime.now().microsecondsSinceEpoch}';
+    final localMessage = _DisplayChatMessage(
+      id: localId,
       text: draft.caption,
       time: now,
       isOutgoing: true,
       mediaType: draft.type,
       localMediaPath: draft.filePath,
       assetMediaPath: draft.assetPath,
+      deliveryStatus: _isPreviewRoom ? 'read' : 'pending',
     );
 
     setState(() {
@@ -152,7 +248,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     });
     _scrollToBottom();
 
-    if (!draft.isDeviceFile) {
+    if (!draft.isDeviceFile || _isPreviewRoom) {
       setState(() => _sendingMedia = false);
       return;
     }
@@ -162,20 +258,37 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         filePath: draft.filePath!,
         type: draft.type,
       );
-      await _repository.sendMediaMessage(
+      final currentUserId = _currentUserId ?? await _repository.currentUserId();
+      final sent = await _repository.sendMediaMessage(
         roomId: widget.roomId,
         upload: upload,
         text: draft.caption,
       );
-    } on ChatAuthExpiredException {
       if (!mounted) return;
-      _showTemporaryAction('Media added locally. Sign in again to send it.');
+      setState(() {
+        _currentUserId = currentUserId;
+        _messages = _messages
+            .map(
+              (message) => message.id == localId
+                  ? _DisplayChatMessage.fromChatMessage(
+                      sent,
+                      currentUserId: currentUserId,
+                    )
+                  : message,
+            )
+            .toList();
+      });
+    } on ChatAuthExpiredException {
+      _markMessageFailed(localId);
+      if (mounted) context.go('/login');
     } on ChatApiException catch (error) {
       if (!mounted) return;
-      _showTemporaryAction('Media added locally. ${error.message}');
+      _markMessageFailed(localId);
+      _showTemporaryAction(error.message);
     } on Object {
       if (!mounted) return;
-      _showTemporaryAction('Media added locally. Backend send failed.');
+      _markMessageFailed(localId);
+      _showTemporaryAction('Media failed to send.');
     } finally {
       if (mounted) setState(() => _sendingMedia = false);
     }
@@ -197,7 +310,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final colors = context.chatColors;
     final conversation = _conversation ?? widget.conversation;
     final title = conversation?.title ?? 'denarius';
-    final isOnline = conversation?.participant?.isOnline ?? true;
+    final isOnline = conversation?.participant?.isOnline ?? _isPreviewRoom;
     final avatarUrl = conversation?.imageUrl;
 
     return Scaffold(
@@ -232,6 +345,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               Expanded(
                 child: _MessageArea(
                   messages: _messages,
+                  isLoading: _isLoadingMessages,
+                  errorMessage: _messageError,
+                  onRetry: _loadMessages,
                   scrollController: _scrollController,
                   onTap: () {
                     if (_showEmojiMenu || _showAttachmentMenu) {
@@ -271,7 +387,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 onEmoji: () => _showToast('Emoji'),
                 onGif: () => _showToast('GIF'),
                 onSticker: () => _showToast('Sticker'),
-                onSend: _sendMockMessage,
+                onSend: _sendMessage,
                 onVoiceMessage: () => _showToast('Voice message'),
               ),
             ],
@@ -285,18 +401,51 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 class _MessageArea extends StatelessWidget {
   const _MessageArea({
     required this.messages,
+    required this.isLoading,
+    required this.errorMessage,
+    required this.onRetry,
     required this.scrollController,
     required this.onTap,
   });
 
-  final List<_MockChatMessage> messages;
+  final List<_DisplayChatMessage> messages;
+  final bool isLoading;
+  final String? errorMessage;
+  final VoidCallback onRetry;
   final ScrollController scrollController;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
-    final horizontalPadding = width >= 700 ? 40.0 : 24.0;
+    final horizontalPadding = width >= 700 ? 36.0 : 18.0;
+
+    if (isLoading) {
+      return Center(
+        child: CircularProgressIndicator(color: context.chatColors.accent),
+      );
+    }
+
+    final error = errorMessage;
+    if (error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                error,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: context.chatColors.primaryText),
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
+            ],
+          ),
+        ),
+      );
+    }
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -305,22 +454,23 @@ class _MessageArea extends StatelessWidget {
         controller: scrollController,
         padding: EdgeInsets.fromLTRB(
           horizontalPadding,
-          22,
-          horizontalPadding,
           16,
+          horizontalPadding,
+          12,
         ),
         children: [
           const _DateDivider(label: 'Today'),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           for (final message in messages)
             MessageBubble(
               text: message.text,
               time: message.time,
               isOutgoing: message.isOutgoing,
-              showReadReceipt: message.isOutgoing,
+              deliveryStatus: message.deliveryStatus,
               mediaType: message.mediaType,
               localMediaPath: message.localMediaPath,
               assetMediaPath: message.assetMediaPath,
+              remoteMediaUrl: message.remoteMediaUrl,
             ),
         ],
       ),
@@ -349,7 +499,7 @@ class _DateDivider extends StatelessWidget {
           label,
           style: TextStyle(
             color: colors.secondaryText,
-            fontSize: 16,
+            fontSize: 14,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -358,51 +508,157 @@ class _DateDivider extends StatelessWidget {
   }
 }
 
-class _MockChatMessage {
-  const _MockChatMessage({
+class _DisplayChatMessage {
+  const _DisplayChatMessage({
+    required this.id,
     required this.text,
     required this.time,
     required this.isOutgoing,
+    this.deliveryStatus,
     this.mediaType,
     this.localMediaPath,
     this.assetMediaPath,
+    this.remoteMediaUrl,
   });
 
+  final String id;
   final String text;
   final String time;
   final bool isOutgoing;
+  final String? deliveryStatus;
   final ChatMediaType? mediaType;
   final String? localMediaPath;
   final String? assetMediaPath;
+  final String? remoteMediaUrl;
+
+  _DisplayChatMessage copyWith({String? deliveryStatus}) {
+    return _DisplayChatMessage(
+      id: id,
+      text: text,
+      time: time,
+      isOutgoing: isOutgoing,
+      deliveryStatus: deliveryStatus ?? this.deliveryStatus,
+      mediaType: mediaType,
+      localMediaPath: localMediaPath,
+      assetMediaPath: assetMediaPath,
+      remoteMediaUrl: remoteMediaUrl,
+    );
+  }
+
+  factory _DisplayChatMessage.fromChatMessage(
+    ChatMessage message, {
+    required String? currentUserId,
+  }) {
+    return _DisplayChatMessage(
+      id: message.id,
+      text: message.text ?? '',
+      time: _formatMessageTime(message.createdAt),
+      isOutgoing: message.isMine(currentUserId),
+      deliveryStatus: message.status ?? 'sent',
+      mediaType: _displayMediaType(message),
+      remoteMediaUrl:
+          message.imageUrl ??
+          message.videoUrl ??
+          message.audioUrl ??
+          message.fileUrl,
+    );
+  }
 }
 
 const _mockMessages = [
-  _MockChatMessage(text: 'hi', time: '11:30 AM', isOutgoing: true),
-  _MockChatMessage(text: 'how are you', time: '11:30 AM', isOutgoing: true),
-  _MockChatMessage(
+  _DisplayChatMessage(
+    id: 'mock-1',
+    text: 'hi',
+    time: '11:30 AM',
+    isOutgoing: true,
+    deliveryStatus: 'read',
+  ),
+  _DisplayChatMessage(
+    id: 'mock-2',
+    text: 'how are you',
+    time: '11:30 AM',
+    isOutgoing: true,
+    deliveryStatus: 'read',
+  ),
+  _DisplayChatMessage(
+    id: 'mock-3',
     text: 'am fine and you',
     time: '11:30 AM',
     isOutgoing: false,
   ),
-  _MockChatMessage(text: 'sup for today', time: '11:31 AM', isOutgoing: true),
-  _MockChatMessage(text: 'nothing much', time: '11:31 AM', isOutgoing: false),
-  _MockChatMessage(
+  _DisplayChatMessage(
+    id: 'mock-4',
+    text: 'sup for today',
+    time: '11:31 AM',
+    isOutgoing: true,
+    deliveryStatus: 'read',
+  ),
+  _DisplayChatMessage(
+    id: 'mock-5',
+    text: 'nothing much',
+    time: '11:31 AM',
+    isOutgoing: false,
+  ),
+  _DisplayChatMessage(
+    id: 'mock-6',
     text: 'ok preparing for class ?',
     time: '11:31 AM',
     isOutgoing: true,
+    deliveryStatus: 'read',
   ),
-  _MockChatMessage(
+  _DisplayChatMessage(
+    id: 'mock-7',
     text: 'no am at the bank',
     time: '11:31 AM',
     isOutgoing: false,
   ),
-  _MockChatMessage(text: 'kk', time: '11:32 AM', isOutgoing: true),
-  _MockChatMessage(
+  _DisplayChatMessage(
+    id: 'mock-8',
+    text: 'kk',
+    time: '11:32 AM',
+    isOutgoing: true,
+    deliveryStatus: 'read',
+  ),
+  _DisplayChatMessage(
+    id: 'mock-9',
     text: 'ok I will hit you up when am done',
     time: '11:32 AM',
     isOutgoing: false,
   ),
 ];
+
+ChatMediaType? _displayMediaType(ChatMessage message) {
+  final type = message.mediaType;
+  if (type != null) {
+    switch (type) {
+      case 'video':
+        return ChatMediaType.video;
+      case 'audio':
+        return ChatMediaType.audio;
+      case 'file':
+        return ChatMediaType.file;
+      case 'image':
+        return ChatMediaType.image;
+    }
+  }
+  if (message.videoUrl != null) return ChatMediaType.video;
+  if (message.audioUrl != null) return ChatMediaType.audio;
+  if (message.fileUrl != null) return ChatMediaType.file;
+  if (message.imageUrl != null) return ChatMediaType.image;
+  return null;
+}
+
+String _formatMessageTime(DateTime? time) {
+  final value = time ?? DateTime.now();
+  final hour = value.hour == 0
+      ? 12
+      : value.hour > 12
+      ? value.hour - 12
+      : value.hour;
+  final minute = value.minute.toString().padLeft(2, '0');
+  final suffix = value.hour >= 12 ? 'PM' : 'AM';
+  return '$hour:$minute $suffix';
+}
 
 class ChatRoomDarkPreview extends StatelessWidget {
   const ChatRoomDarkPreview({super.key});

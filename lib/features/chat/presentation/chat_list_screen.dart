@@ -357,7 +357,7 @@ class _ChatListScreenState extends State<ChatListScreen>
       extendBody: true,
       backgroundColor: colors.background,
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 86),
+        padding: const EdgeInsets.only(bottom: 70),
         child: _NewChatButton(
           onPressed: () =>
               _tabController.index == 0 ? _startPrivateChat() : _createGroup(),
@@ -381,7 +381,7 @@ class _ChatListScreenState extends State<ChatListScreen>
                   physics: const AlwaysScrollableScrollPhysics(),
                   slivers: [
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(24, 40, 24, 0),
+                      padding: const EdgeInsets.fromLTRB(18, 22, 18, 0),
                       sliver: SliverToBoxAdapter(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -389,14 +389,14 @@ class _ChatListScreenState extends State<ChatListScreen>
                             _ChatListHeader(
                               onHome: () => context.go('/dashboard'),
                             ),
-                            const SizedBox(height: 28),
+                            const SizedBox(height: 16),
                             _ChatSearchField(
                               controller: _searchController,
                               onChanged: (_) => setState(() {}),
                             ),
-                            const SizedBox(height: 20),
+                            const SizedBox(height: 12),
                             _ChatSegmentedTabs(controller: _tabController),
-                            const SizedBox(height: 18),
+                            const SizedBox(height: 10),
                           ],
                         ),
                       ),
@@ -463,9 +463,9 @@ class _ChatListHeader extends StatelessWidget {
           child: Row(
             children: [
               Container(
-                width: 52,
-                height: 52,
-                padding: const EdgeInsets.all(5),
+                width: 38,
+                height: 38,
+                padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
                   color: colors.glassSurface,
                   shape: BoxShape.circle,
@@ -485,7 +485,7 @@ class _ChatListHeader extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 10),
               Flexible(
                 child: Text(
                   'Chats',
@@ -493,7 +493,7 @@ class _ChatListHeader extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: colors.primaryText,
-                    fontSize: 40,
+                    fontSize: 30,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 0,
                   ),
@@ -505,7 +505,7 @@ class _ChatListHeader extends StatelessWidget {
         IconButton(
           tooltip: 'Home',
           onPressed: onHome,
-          icon: Icon(Icons.home_outlined, color: colors.accent, size: 32),
+          icon: Icon(Icons.home_outlined, color: colors.accent, size: 25),
         ),
       ],
     );
@@ -523,10 +523,10 @@ class _ChatSearchField extends StatelessWidget {
     final colors = context.chatColors;
 
     return Container(
-      height: 64,
+      height: 50,
       decoration: BoxDecoration(
         color: colors.composerSurface,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: colors.border),
         boxShadow: [
           BoxShadow(
@@ -542,20 +542,20 @@ class _ChatSearchField extends StatelessWidget {
         cursorColor: colors.cursor,
         style: TextStyle(
           color: colors.primaryText,
-          fontSize: 19,
+          fontSize: 15,
           fontWeight: FontWeight.w500,
         ),
         decoration: InputDecoration(
           hintText: 'Search chats',
           hintStyle: TextStyle(
             color: colors.placeholderText,
-            fontSize: 19,
+            fontSize: 15,
             fontWeight: FontWeight.w500,
           ),
           prefixIcon: Icon(
             Icons.search_rounded,
             color: colors.mutedIcon,
-            size: 31,
+            size: 23,
           ),
           suffixIcon: IconButton(
             tooltip: 'Filter chats',
@@ -563,14 +563,14 @@ class _ChatSearchField extends StatelessWidget {
             icon: Icon(
               Icons.filter_alt_outlined,
               color: colors.accent,
-              size: 28,
+              size: 22,
             ),
           ),
           border: InputBorder.none,
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
           filled: false,
-          contentPadding: const EdgeInsets.symmetric(vertical: 20),
+          contentPadding: const EdgeInsets.symmetric(vertical: 13),
         ),
       ),
     );
@@ -587,10 +587,10 @@ class _ChatSegmentedTabs extends StatelessWidget {
     final colors = context.chatColors;
 
     return Container(
-      height: 66,
+      height: 50,
       decoration: BoxDecoration(
         color: colors.composerSurface,
-        borderRadius: BorderRadius.circular(23),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: colors.border),
         boxShadow: [
           BoxShadow(
@@ -605,12 +605,12 @@ class _ChatSegmentedTabs extends StatelessWidget {
         dividerColor: Colors.transparent,
         indicatorColor: colors.accent,
         indicatorWeight: 3,
-        indicatorPadding: const EdgeInsets.symmetric(horizontal: 46),
+        indicatorPadding: const EdgeInsets.symmetric(horizontal: 34),
         labelColor: colors.accent,
         unselectedLabelColor: colors.secondaryText,
-        labelStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        labelStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
         unselectedLabelStyle: const TextStyle(
-          fontSize: 18,
+          fontSize: 15,
           fontWeight: FontWeight.w700,
         ),
         tabs: const [
@@ -642,12 +642,12 @@ class _ConversationList extends StatelessWidget {
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(24, 0, 24, 150),
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 118),
       itemCount: chats.length,
       itemBuilder: (context, index) {
         final chat = chats[index];
         return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.only(bottom: 7),
           child: _ConversationCard(chat: chat),
         );
       },
@@ -670,14 +670,14 @@ class _ConversationCard extends StatelessWidget {
         : 'Start a secure conversation';
 
     return InkWell(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(16),
       onTap: () => context.push('/chat/${chat.id}', extra: chat),
       child: Container(
-        constraints: const BoxConstraints(minHeight: 92),
-        padding: const EdgeInsets.fromLTRB(20, 16, 22, 16),
+        constraints: const BoxConstraints(minHeight: 66),
+        padding: const EdgeInsets.fromLTRB(13, 9, 14, 9),
         decoration: BoxDecoration(
           color: colors.composerSurface,
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: colors.border),
           boxShadow: [
             BoxShadow(
@@ -690,7 +690,7 @@ class _ConversationCard extends StatelessWidget {
         child: Row(
           children: [
             _ChatAvatar(chat: chat),
-            const SizedBox(width: 18),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -702,25 +702,25 @@ class _ConversationCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: colors.primaryText,
-                      fontSize: 20,
+                      fontSize: 15,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 3),
                   Text(
                     subtitle,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: colors.secondaryText,
-                      fontSize: 17,
+                      fontSize: 13,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 8),
             _ConversationMeta(chat: chat),
           ],
         ),
@@ -743,8 +743,8 @@ class _ChatAvatar extends StatelessWidget {
         : chat.title.trim().characters.first.toUpperCase();
 
     return Container(
-      width: 56,
-      height: 56,
+      width: 40,
+      height: 40,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: _avatarBackground(colors, chat.title),
@@ -753,12 +753,12 @@ class _ChatAvatar extends StatelessWidget {
       child: imageUrl == null || imageUrl.isEmpty
           ? Center(
               child: chat.isGroup
-                  ? Icon(Icons.groups_rounded, color: colors.accent, size: 30)
+                  ? Icon(Icons.groups_rounded, color: colors.accent, size: 22)
                   : Text(
                       label,
                       style: TextStyle(
                         color: _avatarForeground(colors, chat.title),
-                        fontSize: 27,
+                        fontSize: 20,
                         fontWeight: FontWeight.w900,
                       ),
                     ),
@@ -787,15 +787,15 @@ class _ConversationMeta extends StatelessWidget {
           _timeLabel(chat.lastMessageTime),
           style: TextStyle(
             color: colors.secondaryText,
-            fontSize: 16,
+            fontSize: 12,
             fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 5),
         if (chat.unreadCount > 0)
           Container(
-            constraints: const BoxConstraints(minWidth: 27, minHeight: 27),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             alignment: Alignment.center,
             decoration: BoxDecoration(
               color: colors.accent,
@@ -806,7 +806,7 @@ class _ConversationMeta extends StatelessWidget {
               chat.unreadCount > 99 ? '99+' : '${chat.unreadCount}',
               style: TextStyle(
                 color: colors.onAccentText,
-                fontSize: 15,
+                fontSize: 11,
                 fontWeight: FontWeight.w900,
               ),
             ),
@@ -815,10 +815,10 @@ class _ConversationMeta extends StatelessWidget {
           Icon(
             Icons.notifications_off_outlined,
             color: colors.mutedIcon,
-            size: 24,
+            size: 18,
           )
         else
-          const SizedBox(height: 27),
+          const SizedBox(height: 20),
       ],
     );
   }
@@ -834,15 +834,15 @@ class _NewChatButton extends StatelessWidget {
     final colors = context.chatColors;
 
     return SizedBox.square(
-      dimension: 72,
+      dimension: 56,
       child: FloatingActionButton(
         tooltip: 'New chat',
         elevation: 10,
         backgroundColor: colors.accent,
         foregroundColor: colors.onAccentText,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         onPressed: onPressed,
-        child: const Icon(Icons.add_rounded, size: 36),
+        child: const Icon(Icons.add_rounded, size: 27),
       ),
     );
   }
@@ -858,12 +858,12 @@ class _ChatBottomNavigation extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+        padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
         child: Container(
-          height: 76,
+          height: 60,
           decoration: BoxDecoration(
             color: colors.composerSurface,
-            borderRadius: BorderRadius.circular(36),
+            borderRadius: BorderRadius.circular(28),
             border: Border.all(color: colors.border),
             boxShadow: [
               BoxShadow(
@@ -912,19 +912,19 @@ class _ChatNavItem extends StatelessWidget {
     final foreground = selected ? colors.accent : colors.secondaryText;
 
     return SizedBox(
-      width: 72,
+      width: 60,
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, color: foreground, size: 30),
-          const SizedBox(height: 4),
+          Icon(icon, color: foreground, size: 22),
+          const SizedBox(height: 2),
           Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: foreground,
-              fontSize: 13,
+              fontSize: 11,
               fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
             ),
           ),

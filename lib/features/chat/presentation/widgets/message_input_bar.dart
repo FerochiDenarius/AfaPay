@@ -56,8 +56,8 @@ class MessageInputBar extends StatelessWidget {
         builder: (context, constraints) {
           final compact = constraints.maxWidth < 520;
           final horizontalPadding = compact ? 14.0 : 24.0;
-          final sendSize = compact ? 52.0 : 58.0;
-          final toolSize = compact ? 38.0 : 42.0;
+          final sendSize = compact ? 48.0 : 52.0;
+          final toolSize = compact ? 32.0 : 36.0;
           final menuReserve = showAttachmentMenu
               ? (compact ? 276.0 : 286.0)
               : 0.0;
@@ -87,9 +87,9 @@ class MessageInputBar extends StatelessWidget {
                             constraints: BoxConstraints(minHeight: sendSize),
                             padding: EdgeInsets.fromLTRB(
                               compact ? 7 : 9,
-                              compact ? 6 : 8,
+                              compact ? 5 : 7,
                               compact ? 7 : 9,
-                              compact ? 6 : 8,
+                              compact ? 5 : 7,
                             ),
                             decoration: BoxDecoration(
                               color: colors.composerSurface,
@@ -126,14 +126,14 @@ class MessageInputBar extends StatelessWidget {
                                     onSubmitted: (_) => onSend(),
                                     style: TextStyle(
                                       color: colors.primaryText,
-                                      fontSize: compact ? 16 : 18,
+                                      fontSize: compact ? 15 : 16,
                                       fontWeight: FontWeight.w500,
                                     ),
                                     decoration: InputDecoration(
                                       hintText: 'Type a message...',
                                       hintStyle: TextStyle(
                                         color: colors.placeholderText,
-                                        fontSize: compact ? 16 : 18,
+                                        fontSize: compact ? 15 : 16,
                                         fontWeight: FontWeight.w500,
                                       ),
                                       filled: false,
@@ -143,7 +143,7 @@ class MessageInputBar extends StatelessWidget {
                                       isDense: true,
                                       contentPadding:
                                           const EdgeInsets.symmetric(
-                                            vertical: 11,
+                                            vertical: 9,
                                           ),
                                     ),
                                   ),
@@ -182,6 +182,7 @@ class MessageInputBar extends StatelessWidget {
                           child: IconButton(
                             tooltip: hasText ? 'Send' : 'Voice message',
                             style: IconButton.styleFrom(
+                              padding: EdgeInsets.zero,
                               backgroundColor: colors.accent,
                               foregroundColor: colors.onAccentText,
                               shape: const CircleBorder(),
@@ -197,7 +198,7 @@ class MessageInputBar extends StatelessWidget {
                               child: Icon(
                                 hasText ? Icons.send_rounded : Icons.mic_none,
                                 key: ValueKey(hasText),
-                                size: compact ? 25 : 28,
+                                size: compact ? 22 : 24,
                               ),
                             ),
                           ),
@@ -265,6 +266,7 @@ class _InputIconButton extends StatelessWidget {
       child: IconButton(
         tooltip: tooltip,
         style: IconButton.styleFrom(
+          padding: EdgeInsets.zero,
           backgroundColor: filled || selected
               ? colors.composerButtonSurface
               : colors.composerSurface,
