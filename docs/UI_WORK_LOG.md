@@ -3,6 +3,38 @@
 This file is updated after every completed UI task. It records what was built,
 the behavior implemented, navigation decisions, tests, and device deployment.
 
+## 2026-06-24 - Chat Contacts Light and Dark UI
+
+### UI
+
+- Refactored the chat contacts/list screen to match the supplied light and dark
+  references.
+- Added a large Chats header with a home action.
+- Rebuilt the search field as a rounded themed container with search and filter
+  controls.
+- Rebuilt the Private/Groups selector as a rounded segmented tab surface.
+- Replaced the old list tiles with rounded chat cards, avatar initials, preview
+  text, timestamps, unread badges, and muted indicators.
+- Added a rounded yellow floating new-chat button.
+- Added the chat bottom navigation surface for Chats, Contacts, Calls, and
+  Settings.
+- Removed old hardcoded chat-list colors from the screen and moved the UI to
+  the existing chat theme resources.
+
+### Logic and Backend
+
+- Preserved existing repository calls for private chats, groups, user search,
+  new private chat creation, and group creation.
+- Preserved the existing authenticated navigation behavior.
+
+### Verification
+
+- `flutter analyze`: passed.
+- `flutter test`: passed.
+- `flutter build apk --debug --dart-define=INITIAL_ROUTE=/chats`: passed.
+- Debug APK install and launch on OPPO `CPH2819`: blocked because ADB no
+  longer listed the device after the build completed.
+
 ## 2026-06-24 - Chat Gallery Media Picker and Backend Media Wiring
 
 ### UI

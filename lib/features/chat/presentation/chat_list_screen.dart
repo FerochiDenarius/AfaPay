@@ -1,13 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/theme/app_theme.dart';
 import '../models/chat_models.dart';
 import '../repositories/chat_repository.dart';
-
-const _gold = Color(0xFFF5B81F);
-const _navy = Color(0xFF020712);
-const _panel = Color(0xFF07101C);
-const _muted = Color(0xFFA9ABB2);
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key, this.initialTab = 0});
@@ -154,8 +150,11 @@ class _ChatListScreenState extends State<ChatListScreen>
           }
 
           return AlertDialog(
-            backgroundColor: _panel,
-            title: const Text('New Chat'),
+            backgroundColor: context.chatColors.menuSurface,
+            title: Text(
+              'New Chat',
+              style: TextStyle(color: context.chatColors.primaryText),
+            ),
             content: SizedBox(
               width: double.maxFinite,
               child: Column(
@@ -172,24 +171,26 @@ class _ChatListScreenState extends State<ChatListScreen>
                   ),
                   const SizedBox(height: 14),
                   if (isSearching)
-                    const Padding(
-                      padding: EdgeInsets.all(14),
-                      child: CircularProgressIndicator(color: _gold),
+                    Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: CircularProgressIndicator(
+                        color: context.chatColors.accent,
+                      ),
                     )
                   else if (errorMessage != null)
                     Text(
                       errorMessage!,
-                      style: const TextStyle(color: Color(0xFFFF7373)),
+                      style: TextStyle(color: context.chatColors.primaryText),
                     )
                   else if (controller.text.trim().length < 2)
-                    const Text(
+                    Text(
                       'Type at least 2 characters to search.',
-                      style: TextStyle(color: _muted),
+                      style: TextStyle(color: context.chatColors.secondaryText),
                     )
                   else if (results.isEmpty)
-                    const Text(
+                    Text(
                       'No users found.',
-                      style: TextStyle(color: _muted),
+                      style: TextStyle(color: context.chatColors.secondaryText),
                     )
                   else
                     Flexible(
@@ -197,14 +198,17 @@ class _ChatListScreenState extends State<ChatListScreen>
                         shrinkWrap: true,
                         itemCount: results.length,
                         separatorBuilder: (_, __) =>
-                            const Divider(color: Color(0xFF162337)),
+                            Divider(color: context.chatColors.border),
                         itemBuilder: (context, index) {
                           final user = results[index];
                           return ListTile(
                             contentPadding: EdgeInsets.zero,
-                            leading: const CircleAvatar(
-                              backgroundColor: Color(0x332B2102),
-                              child: Icon(Icons.person_rounded, color: _gold),
+                            leading: CircleAvatar(
+                              backgroundColor: context.chatColors.accentSoft,
+                              child: Icon(
+                                Icons.person_rounded,
+                                color: context.chatColors.accent,
+                              ),
                             ),
                             title: Text(user.username),
                             onTap: () => Navigator.pop(context, user),
@@ -260,8 +264,11 @@ class _ChatListScreenState extends State<ChatListScreen>
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            backgroundColor: _panel,
-            title: const Text('Create Group'),
+            backgroundColor: context.chatColors.menuSurface,
+            title: Text(
+              'Create Group',
+              style: TextStyle(color: context.chatColors.primaryText),
+            ),
             content: SizedBox(
               width: double.maxFinite,
               child: Column(
@@ -273,9 +280,9 @@ class _ChatListScreenState extends State<ChatListScreen>
                   ),
                   const SizedBox(height: 14),
                   if (contacts.isEmpty)
-                    const Text(
+                    Text(
                       'Start private chats first. Groups can only be created with existing contacts.',
-                      style: TextStyle(color: _muted),
+                      style: TextStyle(color: context.chatColors.secondaryText),
                     )
                   else
                     Flexible(
@@ -287,7 +294,7 @@ class _ChatListScreenState extends State<ChatListScreen>
                           final checked = selected.contains(contact.id);
                           return CheckboxListTile(
                             value: checked,
-                            activeColor: _gold,
+                            activeColor: context.chatColors.accent,
                             title: Text(contact.username),
                             onChanged: (value) {
                               setDialogState(() {
@@ -333,109 +340,251 @@ class _ChatListScreenState extends State<ChatListScreen>
 
   void _showError(String message) {
     if (!mounted) return;
+    final colors = context.chatColors;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: const Color(0xFF8A1C24),
+        backgroundColor: colors.incomingBubbleBorder,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
     return Scaffold(
-      backgroundColor: _navy,
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: _gold,
-        foregroundColor: Colors.black,
-        onPressed: () =>
-            _tabController.index == 0 ? _startPrivateChat() : _createGroup(),
-        child: const Icon(Icons.add_rounded),
+      extendBody: true,
+      backgroundColor: colors.background,
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 86),
+        child: _NewChatButton(
+          onPressed: () =>
+              _tabController.index == 0 ? _startPrivateChat() : _createGroup(),
+        ),
       ),
       body: SafeArea(
-        child: RefreshIndicator(
-          color: _gold,
-          onRefresh: _loadChats,
-          child: CustomScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                sliver: SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Row(
-                        children: [
-                          const Expanded(
-                            child: Text(
-                              'Chats',
-                              style: TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.w900,
-                              ),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [colors.background, colors.backgroundSecondary],
+            ),
+          ),
+          child: Stack(
+            children: [
+              RefreshIndicator(
+                color: colors.accent,
+                onRefresh: _loadChats,
+                child: CustomScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(24, 40, 24, 0),
+                      sliver: SliverToBoxAdapter(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _ChatListHeader(
+                              onHome: () => context.go('/dashboard'),
                             ),
-                          ),
-                          IconButton(
-                            onPressed: () => context.go('/dashboard'),
-                            icon: const Icon(Icons.home_outlined),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      TextField(
-                        controller: _searchController,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(
-                          hintText: 'Search chats',
-                          prefixIcon: Icon(Icons.search_rounded),
+                            const SizedBox(height: 28),
+                            _ChatSearchField(
+                              controller: _searchController,
+                              onChanged: (_) => setState(() {}),
+                            ),
+                            const SizedBox(height: 20),
+                            _ChatSegmentedTabs(controller: _tabController),
+                            const SizedBox(height: 18),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 14),
-                      TabBar(
-                        controller: _tabController,
-                        indicatorColor: _gold,
-                        labelColor: _gold,
-                        tabs: const [
-                          Tab(text: 'Private'),
-                          Tab(text: 'Groups'),
-                        ],
+                    ),
+                    if (_isLoading)
+                      SliverFillRemaining(
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            color: colors.accent,
+                          ),
+                        ),
+                      )
+                    else if (_errorMessage != null)
+                      SliverFillRemaining(
+                        child: _ChatError(
+                          message: _errorMessage!,
+                          onRetry: _loadChats,
+                        ),
+                      )
+                    else
+                      SliverFillRemaining(
+                        hasScrollBody: true,
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: [
+                            _ConversationList(
+                              chats: _filter(_privateChats),
+                              emptyText: 'No private chats yet.',
+                            ),
+                            _ConversationList(
+                              chats: _filter(_groups),
+                              emptyText: 'No group chats yet.',
+                            ),
+                          ],
+                        ),
                       ),
-                    ],
-                  ),
+                  ],
                 ),
               ),
-              if (_isLoading)
-                const SliverFillRemaining(
-                  child: Center(child: CircularProgressIndicator(color: _gold)),
-                )
-              else if (_errorMessage != null)
-                SliverFillRemaining(
-                  child: _ChatError(
-                    message: _errorMessage!,
-                    onRetry: _loadChats,
-                  ),
-                )
-              else
-                SliverFillRemaining(
-                  hasScrollBody: true,
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      _ConversationList(
-                        chats: _filter(_privateChats),
-                        emptyText: 'No private chats yet.',
-                      ),
-                      _ConversationList(
-                        chats: _filter(_groups),
-                        emptyText: 'No group chats yet.',
-                      ),
-                    ],
-                  ),
-                ),
+              const Align(
+                alignment: Alignment.bottomCenter,
+                child: _ChatBottomNavigation(),
+              ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _ChatListHeader extends StatelessWidget {
+  const _ChatListHeader({required this.onHome});
+
+  final VoidCallback onHome;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            'Chats',
+            style: TextStyle(
+              color: colors.primaryText,
+              fontSize: 40,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 0,
+            ),
+          ),
+        ),
+        IconButton(
+          tooltip: 'Home',
+          onPressed: onHome,
+          icon: Icon(Icons.home_outlined, color: colors.accent, size: 32),
+        ),
+      ],
+    );
+  }
+}
+
+class _ChatSearchField extends StatelessWidget {
+  const _ChatSearchField({required this.controller, required this.onChanged});
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
+    return Container(
+      height: 64,
+      decoration: BoxDecoration(
+        color: colors.composerSurface,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: colors.border),
+        boxShadow: [
+          BoxShadow(
+            color: colors.shadow,
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        cursorColor: colors.cursor,
+        style: TextStyle(
+          color: colors.primaryText,
+          fontSize: 19,
+          fontWeight: FontWeight.w500,
+        ),
+        decoration: InputDecoration(
+          hintText: 'Search chats',
+          hintStyle: TextStyle(
+            color: colors.placeholderText,
+            fontSize: 19,
+            fontWeight: FontWeight.w500,
+          ),
+          prefixIcon: Icon(
+            Icons.search_rounded,
+            color: colors.mutedIcon,
+            size: 31,
+          ),
+          suffixIcon: IconButton(
+            tooltip: 'Filter chats',
+            onPressed: () {},
+            icon: Icon(
+              Icons.filter_alt_outlined,
+              color: colors.accent,
+              size: 28,
+            ),
+          ),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          filled: false,
+          contentPadding: const EdgeInsets.symmetric(vertical: 20),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatSegmentedTabs extends StatelessWidget {
+  const _ChatSegmentedTabs({required this.controller});
+
+  final TabController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
+    return Container(
+      height: 66,
+      decoration: BoxDecoration(
+        color: colors.composerSurface,
+        borderRadius: BorderRadius.circular(23),
+        border: Border.all(color: colors.border),
+        boxShadow: [
+          BoxShadow(
+            color: colors.shadow,
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: TabBar(
+        controller: controller,
+        dividerColor: Colors.transparent,
+        indicatorColor: colors.accent,
+        indicatorWeight: 3,
+        indicatorPadding: const EdgeInsets.symmetric(horizontal: 46),
+        labelColor: colors.accent,
+        unselectedLabelColor: colors.secondaryText,
+        labelStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+        unselectedLabelStyle: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        ),
+        tabs: const [
+          Tab(text: 'Private'),
+          Tab(text: 'Groups'),
+        ],
       ),
     );
   }
@@ -449,67 +598,101 @@ class _ConversationList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
     if (chats.isEmpty) {
       return Center(
-        child: Text(emptyText, style: const TextStyle(color: _muted)),
+        child: Text(
+          emptyText,
+          style: TextStyle(color: colors.secondaryText, fontSize: 16),
+        ),
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 96),
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(24, 0, 24, 150),
       itemCount: chats.length,
-      separatorBuilder: (_, __) => const Divider(color: Color(0xFF162337)),
       itemBuilder: (context, index) {
         final chat = chats[index];
-        return ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: _ChatAvatar(chat: chat),
-          title: Text(
-            chat.title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
-          subtitle: Text(
-            chat.subtitle ?? '',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: _muted),
-          ),
-          trailing: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                _timeLabel(chat.lastMessageTime),
-                style: const TextStyle(color: _muted, fontSize: 12),
-              ),
-              if (chat.unreadCount > 0) ...[
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 3,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _gold,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    chat.unreadCount > 99 ? '99+' : '${chat.unreadCount}',
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontSize: 11,
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _ConversationCard(chat: chat),
+        );
+      },
+    );
+  }
+}
+
+class _ConversationCard extends StatelessWidget {
+  const _ConversationCard({required this.chat});
+
+  final ChatConversation chat;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+    final subtitle = chat.subtitle?.isNotEmpty == true
+        ? chat.subtitle!
+        : chat.isGroup
+        ? 'Group chat'
+        : 'Start a secure conversation';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () => context.push('/chat/${chat.id}', extra: chat),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 92),
+        padding: const EdgeInsets.fromLTRB(20, 16, 22, 16),
+        decoration: BoxDecoration(
+          color: colors.composerSurface,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: colors.border),
+          boxShadow: [
+            BoxShadow(
+              color: colors.shadow,
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            _ChatAvatar(chat: chat),
+            const SizedBox(width: 18),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    chat.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: colors.primaryText,
+                      fontSize: 20,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
-                ),
-              ],
-            ],
-          ),
-          onTap: () => context.push('/chat/${chat.id}', extra: chat),
-        );
-      },
+                  const SizedBox(height: 6),
+                  Text(
+                    subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: colors.secondaryText,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 14),
+            _ConversationMeta(chat: chat),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -521,17 +704,200 @@ class _ChatAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.chatColors;
     final imageUrl = chat.imageUrl;
-    return CircleAvatar(
-      radius: 25,
-      backgroundColor: _gold.withValues(alpha: 0.18),
-      backgroundImage: imageUrl == null ? null : NetworkImage(imageUrl),
-      child: imageUrl == null
-          ? Icon(
-              chat.isGroup ? Icons.groups_rounded : Icons.person_rounded,
-              color: _gold,
+    final label = chat.title.trim().isEmpty
+        ? '?'
+        : chat.title.trim().characters.first.toUpperCase();
+
+    return Container(
+      width: 56,
+      height: 56,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: _avatarBackground(colors, chat.title),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: imageUrl == null || imageUrl.isEmpty
+          ? Center(
+              child: chat.isGroup
+                  ? Icon(Icons.groups_rounded, color: colors.accent, size: 30)
+                  : Text(
+                      label,
+                      style: TextStyle(
+                        color: _avatarForeground(colors, chat.title),
+                        fontSize: 27,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
             )
-          : null,
+          : Image.network(imageUrl, fit: BoxFit.cover),
+    );
+  }
+}
+
+class _ConversationMeta extends StatelessWidget {
+  const _ConversationMeta({required this.chat});
+
+  final ChatConversation chat;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+    final muted =
+        chat.memberCount != null && chat.unreadCount == 0 && chat.isGroup;
+
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          _timeLabel(chat.lastMessageTime),
+          style: TextStyle(
+            color: colors.secondaryText,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 10),
+        if (chat.unreadCount > 0)
+          Container(
+            constraints: const BoxConstraints(minWidth: 27, minHeight: 27),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: colors.accent,
+              borderRadius: BorderRadius.circular(11),
+              border: Border.all(color: colors.outgoingBubbleBorder),
+            ),
+            child: Text(
+              chat.unreadCount > 99 ? '99+' : '${chat.unreadCount}',
+              style: TextStyle(
+                color: colors.onAccentText,
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          )
+        else if (muted)
+          Icon(
+            Icons.notifications_off_outlined,
+            color: colors.mutedIcon,
+            size: 24,
+          )
+        else
+          const SizedBox(height: 27),
+      ],
+    );
+  }
+}
+
+class _NewChatButton extends StatelessWidget {
+  const _NewChatButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
+    return SizedBox.square(
+      dimension: 72,
+      child: FloatingActionButton(
+        tooltip: 'New chat',
+        elevation: 10,
+        backgroundColor: colors.accent,
+        foregroundColor: colors.onAccentText,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        onPressed: onPressed,
+        child: const Icon(Icons.add_rounded, size: 36),
+      ),
+    );
+  }
+}
+
+class _ChatBottomNavigation extends StatelessWidget {
+  const _ChatBottomNavigation();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
+        child: Container(
+          height: 76,
+          decoration: BoxDecoration(
+            color: colors.composerSurface,
+            borderRadius: BorderRadius.circular(36),
+            border: Border.all(color: colors.border),
+            boxShadow: [
+              BoxShadow(
+                color: colors.shadow,
+                blurRadius: 24,
+                offset: const Offset(0, 14),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: const [
+              _ChatNavItem(
+                icon: Icons.chat_bubble_rounded,
+                label: 'Chats',
+                selected: true,
+              ),
+              _ChatNavItem(
+                icon: Icons.person_outline_rounded,
+                label: 'Contacts',
+              ),
+              _ChatNavItem(icon: Icons.call_outlined, label: 'Calls'),
+              _ChatNavItem(icon: Icons.settings_outlined, label: 'Settings'),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatNavItem extends StatelessWidget {
+  const _ChatNavItem({
+    required this.icon,
+    required this.label,
+    this.selected = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+    final foreground = selected ? colors.accent : colors.secondaryText;
+
+    return SizedBox(
+      width: 72,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: foreground, size: 30),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: foreground,
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -544,6 +910,8 @@ class _ChatError extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.chatColors;
+
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
@@ -553,7 +921,7 @@ class _ChatError extends StatelessWidget {
             Text(
               message,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: Color(0xFFFF7373)),
+              style: TextStyle(color: colors.primaryText),
             ),
             const SizedBox(height: 14),
             OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
@@ -562,6 +930,30 @@ class _ChatError extends StatelessWidget {
       ),
     );
   }
+}
+
+Color _avatarBackground(ChatThemeColors colors, String seed) {
+  final base = _avatarForeground(colors, seed);
+  return base.withValues(
+    alpha:
+        ThemeData.estimateBrightnessForColor(colors.background) ==
+            Brightness.dark
+        ? 0.34
+        : 0.16,
+  );
+}
+
+Color _avatarForeground(ChatThemeColors colors, String seed) {
+  final choices = <Color>[
+    colors.accent,
+    colors.online,
+    colors.readReceipt,
+    colors.secondaryText,
+    colors.cursor,
+  ];
+  final index =
+      seed.codeUnits.fold<int>(0, (sum, code) => sum + code) % choices.length;
+  return choices[index];
 }
 
 class _CreateGroupRequest {
