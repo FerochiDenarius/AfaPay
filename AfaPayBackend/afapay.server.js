@@ -1,14 +1,19 @@
 require('dotenv').config();
 
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const helmet = require('helmet');
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
+const { Server } = require('socket.io');
 
 const afapayAuthRoutes = require('./routes/afapayAuth.routes');
 const afapayChatRoutes = require('./routes/afapayChat.routes');
 const afapayDashboardRoutes = require('./routes/afapayDashboard.routes');
 const afapaySecurityRoutes = require('./routes/afapaySecurity.routes');
+const AfaPayChatRoom = require('./models/afapayChatRoom.model');
+const AfaPayUser = require('./models/afapayUser.model');
 
 const app = express();
 
@@ -28,7 +33,7 @@ app.use(
     origin: parseCorsOrigin(
       process.env.CORS_ORIGIN || 'https://afapay.xyz,https://www.afapay.xyz',
     ),
-    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   }),
 );
@@ -69,8 +74,90 @@ async function start() {
     serverSelectionTimeoutMS: 10000,
   });
 
+  const server = http.createServer(app);
+  const io = new Server(server, {
+    cors: {
+      origin: parseCorsOrigin(
+        process.env.CORS_ORIGIN || 'https://afapay.xyz,https://www.afapay.xyz',
+      ),
+      methods: ['GET', 'POST'],
+    },
+    transports: ['websocket', 'polling'],
+  });
+  global.afapayIo = io;
+
+  io.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+      if (!token || !process.env.ACCESS_TOKEN_SECRET) {
+        return next(new Error('Authentication required.'));
+      }
+      const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, {
+        issuer: 'afapay',
+        audience: 'afapay-mobile',
+      });
+      const user = await AfaPayUser.findById(decoded.userId || decoded.sub).select('_id');
+      if (!user) return next(new Error('Invalid session.'));
+      socket.data.userId = user._id.toString();
+      socket.join(socket.data.userId);
+      return next();
+    } catch (_) {
+      return next(new Error('Session expired.'));
+    }
+  });
+
+  io.on('connection', (socket) => {
+    socket.on('joinChatRoom', async (payload = {}) => {
+      const roomId = (payload.roomId || payload)?.toString();
+      if (!mongoose.isValidObjectId(roomId)) return;
+      const room = await AfaPayChatRoom.findOne({
+        _id: roomId,
+        participants: socket.data.userId,
+      }).select('_id').lean();
+      if (room) socket.join(roomId);
+    });
+
+    socket.on('leaveChatRoom', (payload = {}) => {
+      const roomId = (payload.roomId || payload)?.toString();
+      if (roomId) socket.leave(roomId);
+    });
+
+    socket.on('chatTyping', async (payload = {}) => {
+      const roomId = payload.roomId?.toString();
+      if (!mongoose.isValidObjectId(roomId)) return;
+      const room = await AfaPayChatRoom.findOne({
+        _id: roomId,
+        participants: socket.data.userId,
+      }).select('_id').lean();
+      if (!room) return;
+      socket.to(roomId).emit('chatTyping', {
+        roomId,
+        userId: socket.data.userId,
+        isTyping: payload.isTyping === true,
+      });
+    });
+
+    for (const eventName of ['callOffer', 'callAnswer', 'callIceCandidate', 'callEnded']) {
+      socket.on(eventName, async (payload = {}) => {
+        const roomId = payload.roomId?.toString();
+        if (!mongoose.isValidObjectId(roomId)) return;
+        const room = await AfaPayChatRoom.findOne({
+          _id: roomId,
+          participants: socket.data.userId,
+        }).select('_id').lean();
+        if (!room) return;
+        socket.to(roomId).emit(eventName, {
+          ...payload,
+          roomId,
+          senderId: socket.data.userId,
+          sentAt: new Date().toISOString(),
+        });
+      });
+    }
+  });
+
   const port = Number(process.env.PORT || 8080);
-  app.listen(port, '0.0.0.0', () => {
+  server.listen(port, '0.0.0.0', () => {
     console.log(`[AfaPay] API listening on port ${port}`);
   });
 }

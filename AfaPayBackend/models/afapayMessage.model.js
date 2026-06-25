@@ -84,6 +84,14 @@ const afapayMessageSchema = new Schema(
       enum: ['sent', 'delivered', 'read'],
       default: 'sent',
     },
+    isEdited: {
+      type: Boolean,
+      default: false,
+    },
+    editedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     collection: 'afapay_messages',

@@ -1,14 +1,19 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../models/chat_media_draft.dart';
 import '../models/chat_models.dart';
+import '../models/chat_room_settings.dart';
 import '../repositories/chat_repository.dart';
+import '../services/chat_realtime_service.dart';
 import 'chat_media_picker_screen.dart';
 import 'widgets/chat_header.dart';
+import 'widgets/chat_theme_sheet.dart';
+import 'widgets/disappearing_messages_sheet.dart';
 import 'widgets/message_bubble.dart';
 import 'widgets/message_input_bar.dart';
 
@@ -27,15 +32,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _inputFocusNode = FocusNode();
   final _scrollController = ScrollController();
   final _repository = ChatRepository();
+  final _realtime = ChatRealtimeService();
 
   bool _showEmojiMenu = false;
   bool _showAttachmentMenu = false;
   bool _sendingMedia = false;
   bool _isLoadingMessages = false;
+  bool _peerTyping = false;
   String? _messageError;
   String? _currentUserId;
   Timer? _presenceTimer;
+  Timer? _typingTimer;
+  Timer? _peerTypingTimer;
   ChatConversation? _conversation;
+  ChatRoomSettings _settings = ChatRoomSettings.defaults;
+  _DisplayChatMessage? _replyingTo;
   late List<_DisplayChatMessage> _messages;
 
   bool get _isPreviewRoom =>
@@ -52,19 +63,107 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       const Duration(seconds: 30),
       (_) => _refreshPresence(),
     );
+    _messageController.addListener(_handleTypingChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshPresence();
       _loadMessages();
+      _loadSettings();
+      _connectRealtime();
     });
   }
 
   @override
   void dispose() {
     _presenceTimer?.cancel();
+    _typingTimer?.cancel();
+    _peerTypingTimer?.cancel();
+    _realtime.disconnect(widget.roomId);
     _messageController.dispose();
     _inputFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _connectRealtime() async {
+    if (_isPreviewRoom) return;
+    await _realtime.connect(
+      roomId: widget.roomId,
+      onMessageCreated: (payload) {
+        final message = ChatMessage.fromJson(payload);
+        final currentUserId = _currentUserId;
+        if (!mounted || _messages.any((item) => item.id == message.id)) return;
+        setState(() {
+          _messages = [
+            ..._messages,
+            _DisplayChatMessage.fromChatMessage(
+              message,
+              currentUserId: currentUserId,
+            ),
+          ];
+        });
+        _scrollToBottom();
+        unawaited(_repository.markAsRead(widget.roomId));
+      },
+      onMessageEdited: (payload) {
+        final message = ChatMessage.fromJson(payload);
+        if (!mounted) return;
+        setState(() {
+          _messages = _messages
+              .map(
+                (item) => item.id == message.id
+                    ? _DisplayChatMessage.fromChatMessage(
+                        message,
+                        currentUserId: _currentUserId,
+                      )
+                    : item,
+              )
+              .toList();
+        });
+      },
+      onMessageDeleted: (messageId) {
+        if (!mounted || messageId.isEmpty) return;
+        setState(() {
+          _messages = _messages
+              .where((message) => message.id != messageId)
+              .toList();
+        });
+      },
+      onTyping: (payload) {
+        if (!mounted || payload['userId']?.toString() == _currentUserId) return;
+        setState(() => _peerTyping = payload['isTyping'] == true);
+        _peerTypingTimer?.cancel();
+        _peerTypingTimer = Timer(const Duration(seconds: 4), () {
+          if (mounted) setState(() => _peerTyping = false);
+        });
+      },
+      onRead: (_) {
+        if (!mounted) return;
+        setState(() {
+          _messages = _messages
+              .map(
+                (message) => message.isOutgoing
+                    ? message.copyWith(deliveryStatus: 'read')
+                    : message,
+              )
+              .toList();
+        });
+      },
+      onCallSignal: (event, _) {
+        if (!mounted) return;
+        _showTemporaryAction(
+          event == 'callEnded' ? 'Call ended' : 'Incoming call signal',
+        );
+      },
+    );
+  }
+
+  void _handleTypingChanged() {
+    if (_isPreviewRoom || _messageController.text.trim().isEmpty) return;
+    _realtime.sendTyping(roomId: widget.roomId, isTyping: true);
+    _typingTimer?.cancel();
+    _typingTimer = Timer(const Duration(seconds: 2), () {
+      _realtime.sendTyping(roomId: widget.roomId, isTyping: false);
+    });
   }
 
   void _showToast(String label) {
@@ -124,9 +223,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
   }
 
+  Future<void> _loadSettings() async {
+    if (_isPreviewRoom) return;
+    try {
+      final settings = await _repository.fetchRoomSettings(widget.roomId);
+      if (mounted) setState(() => _settings = settings);
+    } on Object {
+      // Settings are cosmetic; leave defaults if the request fails.
+    }
+  }
+
   Future<void> _sendMessage() async {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
+    final replyingToId = _replyingTo?.id;
 
     final optimisticId = 'pending-${DateTime.now().microsecondsSinceEpoch}';
     final optimisticMessage = _DisplayChatMessage(
@@ -142,6 +252,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _messageController.clear();
       _showEmojiMenu = false;
       _showAttachmentMenu = false;
+      _replyingTo = null;
     });
     _scrollToBottom();
 
@@ -152,6 +263,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final sent = await _repository.sendMessage(
         roomId: widget.roomId,
         text: text,
+        repliedToMessageId: replyingToId,
       );
       if (!mounted) return;
       setState(() {
@@ -177,6 +289,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _markMessageFailed(optimisticId);
       _showTemporaryAction('Message failed to send.');
     }
+  }
+
+  Future<void> _sendSystemText(String text) async {
+    _messageController.text = text;
+    await _sendMessage();
   }
 
   Future<void> _refreshPresence() async {
@@ -227,8 +344,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     await _sendMediaDraft(draft);
   }
 
+  Future<void> _pickDocument() async {
+    setState(() {
+      _showAttachmentMenu = false;
+      _showEmojiMenu = false;
+    });
+    final result = await FilePicker.platform.pickFiles();
+    final file = result?.files.single;
+    final path = file?.path;
+    if (path == null || path.isEmpty) return;
+    await _sendMediaDraft(
+      ChatMediaDraft(
+        type: ChatMediaType.file,
+        caption: file?.name ?? 'Document',
+        filePath: path,
+        name: file?.name,
+      ),
+    );
+  }
+
   Future<void> _sendMediaDraft(ChatMediaDraft draft) async {
     if (_sendingMedia) return;
+    final replyingToId = _replyingTo?.id;
     final now = TimeOfDay.now().format(context);
     final localId = 'media-${DateTime.now().microsecondsSinceEpoch}';
     final localMessage = _DisplayChatMessage(
@@ -245,6 +382,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     setState(() {
       _sendingMedia = true;
       _messages = [..._messages, localMessage];
+      _replyingTo = null;
     });
     _scrollToBottom();
 
@@ -263,6 +401,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         roomId: widget.roomId,
         upload: upload,
         text: draft.caption,
+        repliedToMessageId: replyingToId,
       );
       if (!mounted) return;
       setState(() {
@@ -291,6 +430,265 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _showTemporaryAction('Media failed to send.');
     } finally {
       if (mounted) setState(() => _sendingMedia = false);
+    }
+  }
+
+  Future<void> _saveSettings(ChatRoomSettings settings) async {
+    setState(() => _settings = settings);
+    if (_isPreviewRoom) return;
+    try {
+      final saved = await _repository.saveRoomSettings(
+        roomId: widget.roomId,
+        settings: settings,
+      );
+      if (mounted) setState(() => _settings = saved);
+    } on ChatApiException catch (error) {
+      _showTemporaryAction(error.message);
+    } on Object {
+      _showTemporaryAction('Unable to save chat settings.');
+    }
+  }
+
+  Future<void> _openMoreMenu() async {
+    final conversation = _conversation ?? widget.conversation;
+    final participant = conversation?.participant;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: context.chatColors.menuSurface,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.palette_outlined),
+              title: const Text('Chat theme'),
+              onTap: () => Navigator.pop(context, 'theme'),
+            ),
+            ListTile(
+              leading: Icon(
+                _settings.muted
+                    ? Icons.notifications_active_outlined
+                    : Icons.notifications_off_outlined,
+              ),
+              title: Text(
+                _settings.muted ? 'Unmute notifications' : 'Mute notifications',
+              ),
+              onTap: () => Navigator.pop(context, 'mute'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.timer_outlined),
+              title: const Text('Disappearing messages'),
+              onTap: () => Navigator.pop(context, 'disappearing'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.group_add_outlined),
+              title: const Text('New group'),
+              onTap: () => Navigator.pop(context, 'group'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_sweep_outlined),
+              title: const Text('Clear chat'),
+              onTap: () => Navigator.pop(context, 'clear'),
+            ),
+            if (participant != null) ...[
+              ListTile(
+                leading: const Icon(Icons.block_rounded),
+                title: const Text('Block contact'),
+                onTap: () => Navigator.pop(context, 'block'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('Report contact'),
+                onTap: () => Navigator.pop(context, 'report'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'theme') {
+      await showChatThemeSheet(
+        context: context,
+        settings: _settings,
+        onChanged: _saveSettings,
+      );
+    } else if (action == 'mute') {
+      await _saveSettings(_settings.copyWith(muted: !_settings.muted));
+    } else if (action == 'disappearing') {
+      await showDisappearingMessagesSheet(
+        context: context,
+        settings: _settings,
+        onChanged: _saveSettings,
+      );
+    } else if (action == 'group') {
+      context.push('/group-chat');
+    } else if (action == 'clear') {
+      final settings = await _repository.clearChat(widget.roomId);
+      if (!mounted) return;
+      setState(() {
+        _settings = settings;
+        _messages = [];
+      });
+    } else if (action == 'block') {
+      if (participant == null) return;
+      await _repository.blockContact(participant.id);
+      _showTemporaryAction('Contact blocked.');
+    } else if (action == 'report') {
+      if (participant == null) return;
+      await _repository.reportContact(
+        userId: participant.id,
+        roomId: widget.roomId,
+        reason: 'Reported from chat',
+      );
+      _showTemporaryAction('Report sent.');
+    }
+  }
+
+  Future<void> _openMessageActions(_DisplayChatMessage message) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: context.chatColors.menuSurface,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.reply_rounded),
+              title: const Text('Reply'),
+              onTap: () => Navigator.pop(context, 'reply'),
+            ),
+            if (message.isOutgoing && !message.hasMedia)
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit'),
+                onTap: () => Navigator.pop(context, 'edit'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.forward_rounded),
+              title: const Text('Forward'),
+              onTap: () => Navigator.pop(context, 'forward'),
+            ),
+            if (message.isOutgoing)
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded),
+                title: const Text('Delete'),
+                onTap: () => Navigator.pop(context, 'delete'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'reply') {
+      setState(() => _replyingTo = message);
+      _inputFocusNode.requestFocus();
+    } else if (action == 'edit') {
+      await _editMessage(message);
+    } else if (action == 'delete') {
+      await _deleteMessage(message);
+    } else if (action == 'forward') {
+      await _forwardMessage(message);
+    }
+  }
+
+  Future<void> _editMessage(_DisplayChatMessage message) async {
+    final controller = TextEditingController(text: message.text);
+    final nextText = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit message'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 4,
+          decoration: const InputDecoration(hintText: 'Message'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (nextText == null || nextText.isEmpty) return;
+    try {
+      final edited = await _repository.editMessage(
+        messageId: message.id,
+        text: nextText,
+      );
+      if (!mounted) return;
+      setState(() {
+        _messages = _messages
+            .map(
+              (item) => item.id == message.id
+                  ? _DisplayChatMessage.fromChatMessage(
+                      edited,
+                      currentUserId: _currentUserId,
+                    )
+                  : item,
+            )
+            .toList();
+      });
+    } on ChatApiException catch (error) {
+      _showTemporaryAction(error.message);
+    }
+  }
+
+  Future<void> _deleteMessage(_DisplayChatMessage message) async {
+    try {
+      await _repository.deleteMessage(message.id);
+      if (!mounted) return;
+      setState(() {
+        _messages = _messages.where((item) => item.id != message.id).toList();
+      });
+    } on ChatApiException catch (error) {
+      _showTemporaryAction(error.message);
+    }
+  }
+
+  Future<void> _forwardMessage(_DisplayChatMessage message) async {
+    try {
+      final chats = [
+        ...await _repository.fetchPrivateChats(),
+        ...await _repository.fetchGroups(),
+      ].where((chat) => chat.id != widget.roomId).toList();
+      if (!mounted) return;
+      if (chats.isEmpty) {
+        _showTemporaryAction('No other chats available to forward to.');
+        return;
+      }
+      final target = await showDialog<ChatConversation>(
+        context: context,
+        builder: (context) => SimpleDialog(
+          title: const Text('Forward to'),
+          children: [
+            for (final chat in chats)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, chat),
+                child: Text(chat.title),
+              ),
+          ],
+        ),
+      );
+      if (target == null) return;
+      await _repository.forwardMessage(
+        messageId: message.id,
+        targetRoomId: target.id,
+      );
+      _showTemporaryAction('Message forwarded.');
+    } on ChatApiException catch (error) {
+      _showTemporaryAction(error.message);
+    } on Object {
+      _showTemporaryAction('Unable to forward message.');
     }
   }
 
@@ -340,15 +738,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                 },
                 onCall: () => context.push('/voice-call'),
                 onVideoCall: () => context.push('/video-call'),
-                onMore: () => _showTemporaryAction('More'),
+                onMore: _openMoreMenu,
               ),
               Expanded(
                 child: _MessageArea(
                   messages: _messages,
                   isLoading: _isLoadingMessages,
                   errorMessage: _messageError,
+                  peerTyping: _peerTyping,
                   onRetry: _loadMessages,
                   scrollController: _scrollController,
+                  onMessageLongPress: _openMessageActions,
                   onTap: () {
                     if (_showEmojiMenu || _showAttachmentMenu) {
                       setState(() {
@@ -360,6 +760,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                   },
                 ),
               ),
+              if (_replyingTo != null)
+                _ReplyingToBar(
+                  message: _replyingTo!,
+                  onCancel: () => setState(() => _replyingTo = null),
+                ),
               MessageInputBar(
                 controller: _messageController,
                 focusNode: _inputFocusNode,
@@ -378,17 +783,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                     _showAttachmentMenu = false;
                   });
                 },
-                onDocument: () => _showToast('Document'),
+                onDocument: _pickDocument,
                 onGallery: _openMediaPicker,
-                onContact: () => _showToast('Contact'),
-                onLocation: () => _showToast('Location'),
-                onPoll: () => _showToast('Poll'),
-                onEvent: () => _showToast('Event'),
-                onEmoji: () => _showToast('Emoji'),
-                onGif: () => _showToast('GIF'),
-                onSticker: () => _showToast('Sticker'),
+                onContact: () => _sendSystemText('[Contact card]'),
+                onLocation: () => _sendSystemText('[Location]'),
+                onPoll: () => _sendSystemText('[Poll]'),
+                onEvent: () => _sendSystemText('[Event]'),
+                onEmoji: () => _sendSystemText('🙂'),
+                onGif: () => _sendSystemText('[GIF]'),
+                onSticker: () => _sendSystemText('[Sticker]'),
                 onSend: _sendMessage,
-                onVoiceMessage: () => _showToast('Voice message'),
+                onVoiceMessage: () => _sendSystemText('[Voice message]'),
               ),
             ],
           ),
@@ -403,16 +808,20 @@ class _MessageArea extends StatelessWidget {
     required this.messages,
     required this.isLoading,
     required this.errorMessage,
+    required this.peerTyping,
     required this.onRetry,
     required this.scrollController,
+    required this.onMessageLongPress,
     required this.onTap,
   });
 
   final List<_DisplayChatMessage> messages;
   final bool isLoading;
   final String? errorMessage;
+  final bool peerTyping;
   final VoidCallback onRetry;
   final ScrollController scrollController;
+  final ValueChanged<_DisplayChatMessage> onMessageLongPress;
   final VoidCallback onTap;
 
   @override
@@ -466,12 +875,69 @@ class _MessageArea extends StatelessWidget {
               text: message.text,
               time: message.time,
               isOutgoing: message.isOutgoing,
+              replyPreview: message.replyPreview,
+              isEdited: message.isEdited,
               deliveryStatus: message.deliveryStatus,
               mediaType: message.mediaType,
               localMediaPath: message.localMediaPath,
               assetMediaPath: message.assetMediaPath,
               remoteMediaUrl: message.remoteMediaUrl,
+              onLongPress: () => onMessageLongPress(message),
             ),
+          if (peerTyping)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, left: 4),
+              child: Text(
+                'Typing...',
+                style: TextStyle(
+                  color: context.chatColors.secondaryText,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReplyingToBar extends StatelessWidget {
+  const _ReplyingToBar({required this.message, required this.onCancel});
+
+  final _DisplayChatMessage message;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(18, 4, 18, 0),
+      padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+      decoration: BoxDecoration(
+        color: colors.composerSurface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border(left: BorderSide(color: colors.accent, width: 4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.reply_rounded, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message.text.isEmpty ? 'Media message' : message.text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: colors.primaryText,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Cancel reply',
+            onPressed: onCancel,
+            icon: const Icon(Icons.close_rounded),
+          ),
         ],
       ),
     );
@@ -519,6 +985,8 @@ class _DisplayChatMessage {
     this.localMediaPath,
     this.assetMediaPath,
     this.remoteMediaUrl,
+    this.replyPreview,
+    this.isEdited = false,
   });
 
   final String id;
@@ -530,6 +998,14 @@ class _DisplayChatMessage {
   final String? localMediaPath;
   final String? assetMediaPath;
   final String? remoteMediaUrl;
+  final String? replyPreview;
+  final bool isEdited;
+
+  bool get hasMedia =>
+      mediaType != null &&
+      ((localMediaPath != null && localMediaPath!.isNotEmpty) ||
+          (assetMediaPath != null && assetMediaPath!.isNotEmpty) ||
+          (remoteMediaUrl != null && remoteMediaUrl!.isNotEmpty));
 
   _DisplayChatMessage copyWith({String? deliveryStatus}) {
     return _DisplayChatMessage(
@@ -542,6 +1018,8 @@ class _DisplayChatMessage {
       localMediaPath: localMediaPath,
       assetMediaPath: assetMediaPath,
       remoteMediaUrl: remoteMediaUrl,
+      replyPreview: replyPreview,
+      isEdited: isEdited,
     );
   }
 
@@ -561,6 +1039,12 @@ class _DisplayChatMessage {
           message.videoUrl ??
           message.audioUrl ??
           message.fileUrl,
+      replyPreview: message.repliedTo == null
+          ? null
+          : (message.repliedTo!.text?.isNotEmpty == true
+                ? message.repliedTo!.text
+                : 'Media message'),
+      isEdited: message.isEdited,
     );
   }
 }
