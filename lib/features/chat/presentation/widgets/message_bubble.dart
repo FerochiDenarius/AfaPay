@@ -17,9 +17,6 @@ class MessageBubble extends StatelessWidget {
     this.localMediaPath,
     this.assetMediaPath,
     this.remoteMediaUrl,
-    this.replyPreview,
-    this.isEdited = false,
-    this.onLongPress,
   });
 
   final String text;
@@ -31,20 +28,15 @@ class MessageBubble extends StatelessWidget {
   final String? localMediaPath;
   final String? assetMediaPath;
   final String? remoteMediaUrl;
-  final String? replyPreview;
-  final bool isEdited;
-  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.chatColors;
     final maxWidth = MediaQuery.sizeOf(context).width * 0.68;
 
-    return GestureDetector(
-      onLongPress: onLongPress,
-      child: Align(
-        alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
+    return Align(
+      alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
         constraints: BoxConstraints(maxWidth: maxWidth.clamp(188, 460)),
         margin: EdgeInsets.only(
           top: 6,
@@ -74,36 +66,10 @@ class MessageBubble extends StatelessWidget {
             ),
           ],
         ),
-          child: Column(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (replyPreview != null) ...[
-              Container(
-                width: double.infinity,
-                margin: EdgeInsets.fromLTRB(hasMedia ? 8 : 0, 0, hasMedia ? 8 : 0, 8),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                decoration: BoxDecoration(
-                  color: colors.glassSurface.withValues(alpha: 0.35),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border(
-                    left: BorderSide(color: colors.accent, width: 3),
-                  ),
-                ),
-                child: Text(
-                  replyPreview!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isOutgoing
-                        ? colors.onAccentText.withValues(alpha: 0.78)
-                        : colors.secondaryText,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
             if (hasMedia) ...[
               _BubbleMediaPreview(
                 mediaType: mediaType!,
@@ -135,7 +101,7 @@ class MessageBubble extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    isEdited ? '$time edited' : time,
+                    time,
                     style: TextStyle(
                       color: isOutgoing
                           ? colors.onAccentText.withValues(alpha: 0.7)
@@ -155,7 +121,6 @@ class MessageBubble extends StatelessWidget {
               ),
             ),
           ],
-          ),
         ),
       ),
     );

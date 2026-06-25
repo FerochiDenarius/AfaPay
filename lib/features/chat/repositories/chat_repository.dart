@@ -210,36 +210,6 @@ class ChatRepository {
     await _sendJson('/api/messages/$roomId/mark-as-read', const {});
   }
 
-  Future<ChatMessage> editMessage({
-    required String messageId,
-    required String text,
-  }) async {
-    final json = await _requestJson('PATCH', '/api/messages/$messageId', body: {
-      'text': text,
-    });
-    if (json is! Map<String, dynamic>) {
-      throw const ChatApiException('Unable to edit message.');
-    }
-    return ChatMessage.fromJson(json);
-  }
-
-  Future<void> deleteMessage(String messageId) async {
-    await _requestJson('DELETE', '/api/messages/$messageId');
-  }
-
-  Future<ChatMessage> forwardMessage({
-    required String messageId,
-    required String targetRoomId,
-  }) async {
-    final json = await _sendJson('/api/messages/$messageId/forward', {
-      'targetRoomId': targetRoomId,
-    });
-    if (json is! Map<String, dynamic>) {
-      throw const ChatApiException('Unable to forward message.');
-    }
-    return ChatMessage.fromJson(json);
-  }
-
   Future<ChatRoomSettings> fetchRoomSettings(String roomId) async {
     final json = await _getJson('/api/chatrooms/$roomId/settings');
     final settings = json is Map<String, dynamic> ? json['settings'] : null;
@@ -381,20 +351,13 @@ class ChatRepository {
       'Content-Type': 'application/json',
       'Authorization': 'Bearer $token',
     };
-    return switch (method) {
-      'GET' => _client
-          .get(uri, headers: headers)
-          .timeout(const Duration(seconds: 20)),
-      'PATCH' => _client
-          .patch(uri, headers: headers, body: jsonEncode(body))
-          .timeout(const Duration(seconds: 20)),
-      'DELETE' => _client
-          .delete(uri, headers: headers)
-          .timeout(const Duration(seconds: 20)),
-      _ => _client
-          .post(uri, headers: headers, body: jsonEncode(body))
-          .timeout(const Duration(seconds: 20)),
-    };
+    return method == 'GET'
+        ? _client
+              .get(uri, headers: headers)
+              .timeout(const Duration(seconds: 20))
+        : _client
+              .post(uri, headers: headers, body: jsonEncode(body))
+              .timeout(const Duration(seconds: 20));
   }
 
   Future<http.Response> _sendMultipartRequest(

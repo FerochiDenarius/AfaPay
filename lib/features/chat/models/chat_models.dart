@@ -116,8 +116,6 @@ class ChatMessage {
     this.status,
     this.repliedTo,
     this.createdAt,
-    this.isEdited = false,
-    this.editedAt,
   });
 
   final String id;
@@ -136,8 +134,6 @@ class ChatMessage {
   final String? status;
   final ChatMessage? repliedTo;
   final DateTime? createdAt;
-  final bool isEdited;
-  final DateTime? editedAt;
 
   bool get hasMedia =>
       imageUrl != null ||
@@ -172,8 +168,6 @@ class ChatMessage {
           ? ChatMessage.fromJson(repliedTo)
           : null,
       createdAt: _date(json['createdAt'] ?? json['timestamp']),
-      isEdited: json['isEdited'] == true,
-      editedAt: _date(json['editedAt']),
     );
   }
 }

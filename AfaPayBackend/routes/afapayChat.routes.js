@@ -259,8 +259,6 @@ async function replyForClient(message) {
     timestamp: replyMessage.timestamp || replyMessage.createdAt,
     createdAt: replyMessage.createdAt,
     status: replyMessage.status || 'sent',
-    isEdited: replyMessage.isEdited === true,
-    editedAt: replyMessage.editedAt || null,
   };
 }
 
@@ -288,19 +286,7 @@ async function messageForClient(message) {
     timestamp: message.timestamp || message.createdAt,
     createdAt: message.createdAt,
     status: message.status || 'sent',
-    isEdited: message.isEdited === true,
-    editedAt: message.editedAt || null,
   };
-}
-
-function emitRoomEvent(room, eventName, payload) {
-  const io = global.afapayIo;
-  if (!io || !room?._id) return;
-  const roomId = room._id.toString();
-  io.to(roomId).emit(eventName, payload);
-  for (const participant of room.participants || []) {
-    io.to(participant.toString()).emit(eventName, payload);
-  }
 }
 
 async function privateRoomForClient(room, userId) {
@@ -618,142 +604,12 @@ router.post('/messages', requireAfaPayAuth, async (req, res) => {
   await room.save();
 
   const savedMessage = await Message.findById(message._id).populate('repliedTo').lean();
-  const payload = await messageForClient(savedMessage || message);
-  emitRoomEvent(room, 'messageCreated', payload);
-  emitRoomEvent(room, 'chatRoomUpdated', {
-    roomId: room._id.toString(),
-    lastMessage: payload,
-    lastMessageTime: payload.timestamp || payload.createdAt,
-  });
-  return res.status(201).json(payload);
-});
-
-router.patch('/messages/:messageId', requireAfaPayAuth, async (req, res) => {
-  const messageId = String(req.params.messageId || '').trim();
-  const text = String(req.body.text || '').trim().slice(0, 2000);
-  if (!mongoose.isValidObjectId(messageId)) {
-    return res.status(400).json({ success: false, message: 'Valid messageId is required.' });
-  }
-  if (!text) {
-    return res.status(400).json({ success: false, message: 'Edited message text is required.' });
-  }
-
-  const message = await Message.findById(messageId);
-  if (!message) return res.status(404).json({ success: false, message: 'Message not found.' });
-  if (message.senderId.toString() !== req.afapayUser._id.toString()) {
-    return res.status(403).json({ success: false, message: 'You can only edit your own messages.' });
-  }
-  if (message.imageUrl || message.videoUrl || message.audioUrl || message.fileUrl) {
-    return res.status(400).json({ success: false, message: 'Only plain text messages can be edited.' });
-  }
-
-  const room = await ensureRoomParticipant(message.roomId, req.afapayUser._id);
-  if (!room) return res.status(403).json({ success: false, message: 'Not authorized for this room.' });
-
-  message.text = text;
-  message.isEdited = true;
-  message.editedAt = new Date();
-  await message.save();
-
-  room.lastMessage = text;
-  room.lastMessageAt = message.timestamp || message.updatedAt;
-  await room.save();
-
-  const payload = await messageForClient(message);
-  emitRoomEvent(room, 'messageEdited', payload);
-  emitRoomEvent(room, 'chatRoomUpdated', {
-    roomId: room._id.toString(),
-    lastMessage: payload,
-    lastMessageTime: payload.timestamp || payload.createdAt,
-  });
-  return res.json(payload);
-});
-
-router.delete('/messages/:messageId', requireAfaPayAuth, async (req, res) => {
-  const messageId = String(req.params.messageId || '').trim();
-  if (!mongoose.isValidObjectId(messageId)) {
-    return res.status(400).json({ success: false, message: 'Valid messageId is required.' });
-  }
-
-  const message = await Message.findById(messageId);
-  if (!message) return res.status(404).json({ success: false, message: 'Message not found.' });
-  if (message.senderId.toString() !== req.afapayUser._id.toString()) {
-    return res.status(403).json({ success: false, message: 'You can only delete your own messages.' });
-  }
-
-  const room = await ensureRoomParticipant(message.roomId, req.afapayUser._id);
-  if (!room) return res.status(403).json({ success: false, message: 'Not authorized for this room.' });
-
-  await message.deleteOne();
-  const lastMessage = await Message.findOne({ roomId: room._id })
-    .sort({ timestamp: -1, createdAt: -1 })
-    .lean();
-  room.lastMessage = lastMessage ? (lastMessage.text || mediaPreview(lastMessage)) : '';
-  room.lastMessageAt = lastMessage?.timestamp || null;
-  await room.save();
-
-  emitRoomEvent(room, 'messageDeleted', {
-    roomId: room._id.toString(),
-    messageId,
-  });
-  return res.status(204).send();
-});
-
-router.post('/messages/:messageId/forward', requireAfaPayAuth, async (req, res) => {
-  const messageId = String(req.params.messageId || '').trim();
-  const targetRoomId = String(req.body.targetRoomId || req.body.roomId || '').trim();
-  if (!mongoose.isValidObjectId(messageId) || !mongoose.isValidObjectId(targetRoomId)) {
-    return res.status(400).json({ success: false, message: 'Valid messageId and targetRoomId are required.' });
-  }
-
-  const source = await Message.findById(messageId).lean();
-  if (!source) return res.status(404).json({ success: false, message: 'Message not found.' });
-  const sourceRoom = await ensureRoomParticipant(source.roomId, req.afapayUser._id);
-  if (!sourceRoom) return res.status(403).json({ success: false, message: 'Not authorized for source room.' });
-  const targetRoom = await ensureRoomParticipant(targetRoomId, req.afapayUser._id);
-  if (!targetRoom) return res.status(403).json({ success: false, message: 'Not authorized for target room.' });
-
-  const message = await Message.create({
-    roomId: targetRoom._id,
-    conversationId: targetRoom._id,
-    senderId: req.afapayUser._id,
-    text: source.text || '',
-    imageUrl: source.imageUrl || '',
-    videoUrl: source.videoUrl || '',
-    audioUrl: source.audioUrl || '',
-    fileUrl: source.fileUrl || '',
-    mediaType: source.mediaType || '',
-    mediaName: source.mediaName || '',
-    mediaMimeType: source.mediaMimeType || '',
-    mediaSizeBytes: source.mediaSizeBytes || 0,
-    timestamp: new Date(),
-  });
-  targetRoom.lastMessage = message.text || mediaPreview(message);
-  targetRoom.lastMessageAt = message.timestamp;
-  await targetRoom.save();
-
-  const payload = await messageForClient(message);
-  emitRoomEvent(targetRoom, 'messageCreated', payload);
-  emitRoomEvent(targetRoom, 'chatRoomUpdated', {
-    roomId: targetRoom._id.toString(),
-    lastMessage: payload,
-    lastMessageTime: payload.timestamp || payload.createdAt,
-  });
-  return res.status(201).json(payload);
+  return res.status(201).json(await messageForClient(savedMessage || message));
 });
 
 router.post('/messages/:roomId/mark-as-read', requireAfaPayAuth, async (req, res) => {
   const room = await ensureRoomParticipant(req.params.roomId, req.afapayUser._id);
   if (!room) return res.status(403).json({ success: false, message: 'Not authorized for this room.' });
-  await Message.updateMany(
-    { roomId: room._id, senderId: { $ne: req.afapayUser._id }, status: { $ne: 'read' } },
-    { $set: { status: 'read' } },
-  );
-  emitRoomEvent(room, 'chatRoomRead', {
-    roomId: room._id.toString(),
-    userId: req.afapayUser._id.toString(),
-    readAt: new Date().toISOString(),
-  });
   return res.json({ success: true, message: 'Room marked as read.' });
 });
 
