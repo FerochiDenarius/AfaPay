@@ -52,6 +52,7 @@ class ChatRealtimeService with WidgetsBindingObserver {
     final socket = _socket;
     if (socket != null && _activeToken == token) {
       if (!socket.connected) socket.connect();
+      _emitUserOnline(socket);
       requestOnlineUsers();
       return;
     }
@@ -71,8 +72,8 @@ class ChatRealtimeService with WidgetsBindingObserver {
     );
 
     nextSocket.onConnect((_) {
-      nextSocket.emit('userConnected');
-      nextSocket.emit('requestOnlineUsers');
+      _emitUserOnline(nextSocket);
+      _requestOnlineUsers(nextSocket);
       for (final roomId in _joinedRoomIds) {
         nextSocket.emit('joinChatRoom', {'roomId': roomId});
       }
@@ -89,9 +90,14 @@ class ChatRealtimeService with WidgetsBindingObserver {
   }
 
   void requestOnlineUsers() {
+    _requestOnlineUsers(_socket);
+  }
+
+  void markOnline() {
     final socket = _socket;
     if (socket?.connected == true) {
-      socket!.emit('requestOnlineUsers');
+      _emitUserOnline(socket!);
+      _requestOnlineUsers(socket);
     }
   }
 
@@ -118,7 +124,7 @@ class ChatRealtimeService with WidgetsBindingObserver {
   void markOffline() {
     final socket = _socket;
     if (socket?.connected == true) {
-      socket!.emit('userOffline');
+      _emitUserOffline(socket!);
     }
   }
 
@@ -126,7 +132,7 @@ class ChatRealtimeService with WidgetsBindingObserver {
     final socket = _socket;
     if (socket == null) return;
     if (sendOffline && socket.connected) {
-      socket.emit('userOffline');
+      _emitUserOffline(socket);
     }
     socket
       ..off('getOnlineUsers')
@@ -143,11 +149,33 @@ class ChatRealtimeService with WidgetsBindingObserver {
     final ids = <String>{};
     if (data is Iterable) {
       for (final value in data) {
-        final id = value?.toString().trim();
-        if (id != null && id.isNotEmpty) ids.add(id);
+        _addOnlineUserId(ids, value);
+      }
+    } else if (data is Map) {
+      final wrappedUsers =
+          data['onlineUsers'] ?? data['users'] ?? data['userIds'];
+      if (wrappedUsers is Iterable) {
+        for (final value in wrappedUsers) {
+          _addOnlineUserId(ids, value);
+        }
+      } else {
+        _addOnlineUserId(ids, data);
       }
     }
     _onlineUsersController.add(ids);
+  }
+
+  void _addOnlineUserId(Set<String> ids, Object? value) {
+    if (value is Map) {
+      final id = (value['userId'] ?? value['_id'] ?? value['id'])
+          ?.toString()
+          .trim();
+      if (id != null && id.isNotEmpty) ids.add(id);
+      return;
+    }
+
+    final id = value?.toString().trim();
+    if (id != null && id.isNotEmpty) ids.add(id);
   }
 
   void _handlePresenceEvent(Object? data) {
@@ -172,6 +200,22 @@ class ChatRealtimeService with WidgetsBindingObserver {
     _messageController.add(message);
   }
 
+  void _emitUserOnline(socket_io.Socket socket) {
+    socket
+      ..emit('userConnected')
+      ..emit('userOnline');
+  }
+
+  void _emitUserOffline(socket_io.Socket socket) {
+    socket.emit('userOffline');
+  }
+
+  void _requestOnlineUsers(socket_io.Socket? socket) {
+    if (socket?.connected == true) {
+      socket!.emit('requestOnlineUsers');
+    }
+  }
+
   void _ensureLifecycleObserver() {
     if (_observingLifecycle) return;
     WidgetsBinding.instance.addObserver(this);
@@ -181,6 +225,7 @@ class ChatRealtimeService with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      markOnline();
       unawaited(connect());
       return;
     }

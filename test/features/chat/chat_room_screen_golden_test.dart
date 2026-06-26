@@ -121,23 +121,23 @@ void main() {
     expect(find.text('Event'), findsOneWidget);
   });
 
-  testWidgets('gallery attachment opens media picker launcher', (tester) async {
+  testWidgets('attachment menu includes local attachment actions', (
+    tester,
+  ) async {
     await setPhoneSurface(tester);
     await tester.pumpWidget(const ChatRoomDarkPreview());
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Add'));
     await tester.pumpAndSettle();
-    await tester.tap(
-      find
-          .ancestor(of: find.text('Gallery'), matching: find.byType(InkWell))
-          .first,
-    );
-    await tester.pumpAndSettle();
 
-    expect(find.text('Recents'), findsOneWidget);
-    expect(find.text('Device media'), findsOneWidget);
-    expect(find.text('Add a caption...'), findsOneWidget);
+    expect(find.text('Document'), findsOneWidget);
+    expect(find.text('Gallery'), findsOneWidget);
+    expect(find.text('Contact'), findsOneWidget);
+    expect(find.text('Location'), findsOneWidget);
+    expect(find.text('Poll'), findsOneWidget);
+    expect(find.text('Event'), findsOneWidget);
+    expect(find.text('Audio Recording'), findsOneWidget);
   });
 }
 

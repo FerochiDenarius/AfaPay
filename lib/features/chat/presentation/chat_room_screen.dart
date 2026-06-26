@@ -2,13 +2,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../models/chat_attachment.dart';
 import '../models/chat_media_draft.dart';
 import '../models/chat_models.dart';
 import '../models/chat_room_settings.dart';
 import '../repositories/chat_repository.dart';
+import '../services/attachment_picker_manager.dart';
 import '../services/chat_realtime_service.dart';
+import 'chat_media_editor_screen.dart';
 import 'chat_media_picker_screen.dart';
 import 'widgets/chat_room_menu.dart';
 import 'widgets/chat_header.dart';
@@ -34,6 +38,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _scrollController = ScrollController();
   final _repository = ChatRepository();
   final _realtime = ChatRealtimeService.instance;
+  final _mediaPicker = ImagePicker();
+  final _attachmentManager = AttachmentPickerManager();
 
   bool _showEmojiMenu = false;
   bool _showAttachmentMenu = false;
@@ -66,6 +72,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     if (!_isPreviewRoom) {
       _connectRealtime();
     }
+    _attachmentManager.addListener(_handleAttachmentStateChanged);
     _presenceTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => _refreshPresence(),
@@ -83,6 +90,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _onlineUsersSubscription?.cancel();
     _presenceSubscription?.cancel();
     _messageSubscription?.cancel();
+    _attachmentManager
+      ..removeListener(_handleAttachmentStateChanged)
+      ..dispose();
     if (!_isPreviewRoom) {
       _realtime.leaveChatRoom(widget.roomId);
     }
@@ -116,10 +126,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       ..showSnackBar(SnackBar(content: Text(label)));
   }
 
+  void _hideComposerMenus() {
+    setState(() {
+      _showEmojiMenu = false;
+      _showAttachmentMenu = false;
+    });
+  }
+
   void _showTemporaryAction(String label) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(label)));
+  }
+
+  void _handleAttachmentStateChanged() {
+    if (!mounted) return;
+    setState(() {});
+    final error = _attachmentManager.state.errorMessage;
+    if (error != null && error.isNotEmpty) {
+      _showTemporaryAction(error);
+      _attachmentManager.clearError();
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -483,6 +510,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _sendMessage() async {
+    final pendingAttachment = _attachmentManager.state.attachment;
+    if (pendingAttachment != null) {
+      await _sendAttachmentMessage(pendingAttachment);
+      return;
+    }
+
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
@@ -534,6 +567,85 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     } on Object {
       _markMessageFailed(optimisticId);
       _showTemporaryAction('Message failed to send.');
+    }
+  }
+
+  Future<void> _sendAttachmentMessage(ChatAttachment attachment) async {
+    if (_sendingMedia) return;
+    final caption = _messageController.text.trim();
+    final localId = 'attachment-${DateTime.now().microsecondsSinceEpoch}';
+    final localMessage = _DisplayChatMessage(
+      id: localId,
+      text: caption,
+      time: TimeOfDay.now().format(context),
+      isOutgoing: true,
+      deliveryStatus: _isPreviewRoom ? 'read' : 'pending',
+      mediaType: _attachmentMediaType(attachment),
+      localMediaPath: _attachmentLocalMediaPath(attachment),
+      attachment: attachment,
+    );
+
+    _attachmentManager.clearAttachment();
+    setState(() {
+      _sendingMedia = true;
+      _messages = [..._messages, localMessage];
+      _messageController.clear();
+      _showEmojiMenu = false;
+      _showAttachmentMenu = false;
+    });
+    _scrollToBottom();
+
+    if (_isPreviewRoom) {
+      if (mounted) setState(() => _sendingMedia = false);
+      return;
+    }
+
+    try {
+      final currentUserId = _currentUserId ?? await _repository.currentUserId();
+      final sent = switch (attachment) {
+        DocumentAttachment() ||
+        ImageAttachment() ||
+        AudioAttachment() => await _repository.uploadAndSendAttachmentMessage(
+          roomId: widget.roomId,
+          attachment: attachment,
+          text: caption,
+        ),
+        ContactAttachment() ||
+        LocationAttachment() ||
+        PollAttachment() ||
+        EventAttachment() => await _repository.sendStructuredAttachmentMessage(
+          roomId: widget.roomId,
+          attachment: attachment,
+          text: caption,
+        ),
+      };
+      if (!mounted) return;
+      setState(() {
+        _currentUserId = currentUserId;
+        _messages = _messages
+            .map(
+              (message) => message.id == localId
+                  ? _DisplayChatMessage.fromChatMessage(
+                      sent,
+                      currentUserId: currentUserId,
+                    )
+                  : message,
+            )
+            .toList();
+      });
+    } on ChatAuthExpiredException {
+      _markMessageFailed(localId);
+      if (mounted) context.go('/login');
+    } on ChatApiException catch (error) {
+      if (!mounted) return;
+      _markMessageFailed(localId);
+      _showTemporaryAction(error.message);
+    } on Object {
+      if (!mounted) return;
+      _markMessageFailed(localId);
+      _showTemporaryAction('Attachment failed to send.');
+    } finally {
+      if (mounted) setState(() => _sendingMedia = false);
     }
   }
 
@@ -624,7 +736,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     });
   }
 
-  Future<void> _openMediaPicker() async {
+  Future<void> _openMediaPicker({bool autoOpenDevicePicker = true}) async {
     setState(() {
       _showAttachmentMenu = false;
       _showEmojiMenu = false;
@@ -632,12 +744,99 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     final title = (_conversation ?? widget.conversation)?.title ?? 'denarius';
     final draft = await Navigator.of(context).push<ChatMediaDraft>(
       MaterialPageRoute(
-        builder: (_) => ChatMediaPickerScreen(recipientName: title),
+        builder: (_) => ChatMediaPickerScreen(
+          recipientName: title,
+          autoOpenDevicePicker: autoOpenDevicePicker,
+        ),
         fullscreenDialog: true,
       ),
     );
     if (draft == null || !mounted) return;
     await _sendMediaDraft(draft);
+  }
+
+  Future<void> _pickDocumentAttachment() async {
+    _hideComposerMenus();
+    await _attachmentManager.pickDocument();
+  }
+
+  Future<void> _pickGalleryAttachment() async {
+    _hideComposerMenus();
+    await _attachmentManager.pickImage();
+  }
+
+  Future<void> _pickContactAttachment() async {
+    _hideComposerMenus();
+    await _attachmentManager.pickContact();
+  }
+
+  Future<void> _pickLocationAttachment() async {
+    _hideComposerMenus();
+    await _attachmentManager.pickCurrentLocation();
+  }
+
+  Future<void> _showPollAttachmentSheet() async {
+    _hideComposerMenus();
+    final poll = await showModalBottomSheet<PollAttachment>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.chatColors.menuSurface,
+      showDragHandle: true,
+      builder: (context) => const _PollAttachmentSheet(),
+    );
+    if (poll != null) _attachmentManager.setPoll(poll);
+  }
+
+  Future<void> _showEventAttachmentSheet() async {
+    _hideComposerMenus();
+    final event = await showModalBottomSheet<EventAttachment>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.chatColors.menuSurface,
+      showDragHandle: true,
+      builder: (context) => const _EventAttachmentSheet(),
+    );
+    if (event != null) _attachmentManager.setEvent(event);
+  }
+
+  void _showAudioRecordingHint() {
+    _hideComposerMenus();
+    _showTemporaryAction('Press and hold the microphone to record.');
+  }
+
+  Future<void> _openCameraCapture() async {
+    setState(() {
+      _showAttachmentMenu = false;
+      _showEmojiMenu = false;
+    });
+    if (_isPreviewRoom) {
+      await _openMediaPicker(autoOpenDevicePicker: false);
+      return;
+    }
+
+    final media = await _mediaPicker.pickImage(source: ImageSource.camera);
+    if (media == null || !mounted) return;
+
+    final draft = ChatMediaDraft(
+      type: ChatMediaType.image,
+      filePath: media.path,
+      caption: '',
+      name: media.name,
+      mimeType: media.mimeType,
+    );
+    await _openMediaEditor(draft);
+  }
+
+  Future<void> _openMediaEditor(ChatMediaDraft draft) async {
+    final title = (_conversation ?? widget.conversation)?.title ?? 'denarius';
+    final edited = await Navigator.of(context).push<ChatMediaDraft>(
+      MaterialPageRoute(
+        builder: (_) =>
+            ChatMediaEditorScreen(initialDraft: draft, recipientName: title),
+      ),
+    );
+    if (edited == null || !mounted) return;
+    await _sendMediaDraft(edited);
   }
 
   Future<void> _sendMediaDraft(ChatMediaDraft draft) async {
@@ -670,6 +869,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       final upload = await _repository.uploadChatMedia(
         filePath: draft.filePath!,
         type: draft.type,
+        fileName: draft.name,
+        mimeType: draft.mimeType,
       );
       final currentUserId = _currentUserId ?? await _repository.currentUserId();
       final sent = await _repository.sendMediaMessage(
@@ -791,24 +992,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       _showEmojiMenu = false;
                     });
                   },
-                  onCameraPressed: _openMediaPicker,
+                  onCameraPressed: _openCameraCapture,
                   onEmojiButtonPressed: () {
                     setState(() {
                       _showEmojiMenu = !_showEmojiMenu;
                       _showAttachmentMenu = false;
                     });
                   },
-                  onDocument: () => _showToast('Document'),
-                  onGallery: _openMediaPicker,
-                  onContact: () => _showToast('Contact'),
-                  onLocation: () => _showToast('Location'),
-                  onPoll: () => _showToast('Poll'),
-                  onEvent: () => _showToast('Event'),
+                  onDocument: () => unawaited(_pickDocumentAttachment()),
+                  onGallery: () => unawaited(_pickGalleryAttachment()),
+                  onContact: () => unawaited(_pickContactAttachment()),
+                  onLocation: () => unawaited(_pickLocationAttachment()),
+                  onPoll: () => unawaited(_showPollAttachmentSheet()),
+                  onEvent: () => unawaited(_showEventAttachmentSheet()),
+                  onAudioRecording: _showAudioRecordingHint,
                   onEmoji: () => _showToast('Emoji'),
                   onGif: () => _showToast('GIF'),
                   onSticker: () => _showToast('Sticker'),
                   onSend: _sendMessage,
                   onVoiceMessage: () => _showToast('Voice message'),
+                  pendingAttachment: _attachmentManager.state.attachment,
+                  onRemoveAttachment: _attachmentManager.clearAttachment,
+                  isRecordingAudio: _attachmentManager.state.isRecording,
+                  onVoiceRecordingStart: () =>
+                      unawaited(_attachmentManager.startAudioRecording()),
+                  onVoiceRecordingStop: () =>
+                      unawaited(_attachmentManager.stopAudioRecording()),
                 ),
               ],
             ),
@@ -892,6 +1101,7 @@ class _MessageArea extends StatelessWidget {
               localMediaPath: message.localMediaPath,
               assetMediaPath: message.assetMediaPath,
               remoteMediaUrl: message.remoteMediaUrl,
+              attachment: message.attachment,
             ),
         ],
       ),
@@ -940,6 +1150,7 @@ class _DisplayChatMessage {
     this.localMediaPath,
     this.assetMediaPath,
     this.remoteMediaUrl,
+    this.attachment,
   });
 
   final String id;
@@ -951,6 +1162,7 @@ class _DisplayChatMessage {
   final String? localMediaPath;
   final String? assetMediaPath;
   final String? remoteMediaUrl;
+  final ChatAttachment? attachment;
 
   _DisplayChatMessage copyWith({String? deliveryStatus}) {
     return _DisplayChatMessage(
@@ -963,6 +1175,7 @@ class _DisplayChatMessage {
       localMediaPath: localMediaPath,
       assetMediaPath: assetMediaPath,
       remoteMediaUrl: remoteMediaUrl,
+      attachment: attachment,
     );
   }
 
@@ -982,6 +1195,7 @@ class _DisplayChatMessage {
           message.videoUrl ??
           message.audioUrl ??
           message.fileUrl,
+      attachment: message.attachmentPayload,
     );
   }
 }
@@ -1069,6 +1283,30 @@ ChatMediaType? _displayMediaType(ChatMessage message) {
   return null;
 }
 
+ChatMediaType? _attachmentMediaType(ChatAttachment attachment) {
+  return switch (attachment) {
+    DocumentAttachment() => ChatMediaType.file,
+    ImageAttachment() => ChatMediaType.image,
+    AudioAttachment() => ChatMediaType.audio,
+    ContactAttachment() ||
+    LocationAttachment() ||
+    PollAttachment() ||
+    EventAttachment() => null,
+  };
+}
+
+String? _attachmentLocalMediaPath(ChatAttachment attachment) {
+  return switch (attachment) {
+    DocumentAttachment(:final cachePath) => cachePath,
+    ImageAttachment(:final cachePath) => cachePath,
+    AudioAttachment(:final path) => path,
+    ContactAttachment() ||
+    LocationAttachment() ||
+    PollAttachment() ||
+    EventAttachment() => null,
+  };
+}
+
 String _formatMessageTime(DateTime? time) {
   final value = time ?? DateTime.now();
   final hour = value.hour == 0
@@ -1079,6 +1317,209 @@ String _formatMessageTime(DateTime? time) {
   final minute = value.minute.toString().padLeft(2, '0');
   final suffix = value.hour >= 12 ? 'PM' : 'AM';
   return '$hour:$minute $suffix';
+}
+
+class _PollAttachmentSheet extends StatefulWidget {
+  const _PollAttachmentSheet();
+
+  @override
+  State<_PollAttachmentSheet> createState() => _PollAttachmentSheetState();
+}
+
+class _PollAttachmentSheetState extends State<_PollAttachmentSheet> {
+  final _questionController = TextEditingController();
+  final _optionControllers = [TextEditingController(), TextEditingController()];
+
+  @override
+  void dispose() {
+    _questionController.dispose();
+    for (final controller in _optionControllers) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _addOption() {
+    if (_optionControllers.length >= 8) return;
+    setState(() => _optionControllers.add(TextEditingController()));
+  }
+
+  void _submit() {
+    final question = _questionController.text.trim();
+    final options = _optionControllers
+        .map((controller) => controller.text.trim())
+        .where((value) => value.isNotEmpty)
+        .toList();
+    if (question.isEmpty || options.length < 2) return;
+    Navigator.pop(
+      context,
+      PollAttachment(question: question, options: options),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _AttachmentFormShell(
+      title: 'Poll',
+      actionLabel: 'Create',
+      onSubmit: _submit,
+      children: [
+        _AttachmentTextField(
+          controller: _questionController,
+          label: 'Question',
+        ),
+        for (var index = 0; index < _optionControllers.length; index++)
+          _AttachmentTextField(
+            controller: _optionControllers[index],
+            label: index == 0
+                ? 'Option A'
+                : index == 1
+                ? 'Option B'
+                : 'Option ${index + 1}',
+          ),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _addOption,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Add More Option'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EventAttachmentSheet extends StatefulWidget {
+  const _EventAttachmentSheet();
+
+  @override
+  State<_EventAttachmentSheet> createState() => _EventAttachmentSheetState();
+}
+
+class _EventAttachmentSheetState extends State<_EventAttachmentSheet> {
+  final _titleController = TextEditingController();
+  final _dateController = TextEditingController();
+  final _timeController = TextEditingController();
+  final _descriptionController = TextEditingController();
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _dateController.dispose();
+    _timeController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final title = _titleController.text.trim();
+    final date = _dateController.text.trim();
+    final time = _timeController.text.trim();
+    final description = _descriptionController.text.trim();
+    if (title.isEmpty || date.isEmpty || time.isEmpty) return;
+    Navigator.pop(
+      context,
+      EventAttachment(
+        title: title,
+        date: date,
+        time: time,
+        description: description,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _AttachmentFormShell(
+      title: 'Event',
+      actionLabel: 'Create',
+      onSubmit: _submit,
+      children: [
+        _AttachmentTextField(
+          controller: _titleController,
+          label: 'Event Title',
+        ),
+        _AttachmentTextField(controller: _dateController, label: 'Event Date'),
+        _AttachmentTextField(controller: _timeController, label: 'Event Time'),
+        _AttachmentTextField(
+          controller: _descriptionController,
+          label: 'Event Description',
+          minLines: 3,
+          maxLines: 4,
+        ),
+      ],
+    );
+  }
+}
+
+class _AttachmentFormShell extends StatelessWidget {
+  const _AttachmentFormShell({
+    required this.title,
+    required this.actionLabel,
+    required this.onSubmit,
+    required this.children,
+  });
+
+  final String title;
+  final String actionLabel;
+  final VoidCallback onSubmit;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.chatColors;
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 18,
+          right: 18,
+          bottom: MediaQuery.viewInsetsOf(context).bottom + 18,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              title,
+              style: TextStyle(
+                color: colors.primaryText,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 14),
+            ...children.expand((child) => [child, const SizedBox(height: 12)]),
+            FilledButton(onPressed: onSubmit, child: Text(actionLabel)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AttachmentTextField extends StatelessWidget {
+  const _AttachmentTextField({
+    required this.controller,
+    required this.label,
+    this.minLines = 1,
+    this.maxLines = 1,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final int minLines;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      minLines: minLines,
+      maxLines: maxLines,
+      decoration: InputDecoration(labelText: label),
+    );
+  }
 }
 
 class ChatRoomDarkPreview extends StatelessWidget {

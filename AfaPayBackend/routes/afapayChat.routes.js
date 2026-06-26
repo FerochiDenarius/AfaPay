@@ -13,15 +13,22 @@ const { logUploadAudit } = require('../utils/cloudinaryMedia');
 
 const router = express.Router();
 
+function isKnownChatUploadType(value) {
+  return ['image', 'video', 'audio', 'file'].includes(
+    String(value || '').toLowerCase(),
+  );
+}
+
 const chatMediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 60 * 1024 * 1024 },
-  fileFilter(_req, file, cb) {
+  fileFilter(req, file, cb) {
     const mimetype = file.mimetype || '';
     const allowed =
       mimetype.startsWith('image/') ||
       mimetype.startsWith('video/') ||
       mimetype.startsWith('audio/') ||
+      (mimetype === 'application/octet-stream' && isKnownChatUploadType(req.body?.type)) ||
       mimetype === 'application/pdf' ||
       mimetype === 'text/plain' ||
       mimetype === 'application/zip' ||
@@ -31,6 +38,16 @@ const chatMediaUpload = multer({
     cb(allowed ? null : new Error('Unsupported file type'), allowed);
   },
 });
+
+function handleChatMediaUpload(req, res, next) {
+  chatMediaUpload.single('file')(req, res, (error) => {
+    if (!error) return next();
+    return res.status(400).json({
+      success: false,
+      message: error.message || 'Unsupported chat media upload.',
+    });
+  });
+}
 
 function participantKeyFor(userA, userB) {
   return [userA.toString(), userB.toString()].sort().join(':');
@@ -70,12 +87,71 @@ function mediaMessageKeyFor(type) {
   return 'fileUrl';
 }
 
+function uploadSizeLimitFor(type) {
+  if (type === 'image') return 10 * 1024 * 1024;
+  if (type === 'file') return 25 * 1024 * 1024;
+  return 60 * 1024 * 1024;
+}
+
 function mediaPreview(message) {
   if (message.imageUrl) return 'Photo';
   if (message.videoUrl) return 'Video';
   if (message.audioUrl) return 'Voice message';
   if (message.fileUrl) return 'File';
+  if (message.attachmentType === 'contact') return 'Contact';
+  if (message.attachmentType === 'location') return 'Location';
+  if (message.attachmentType === 'poll') return 'Poll';
+  if (message.attachmentType === 'event') return 'Event';
   return 'Media';
+}
+
+function normalizeStructuredAttachment(type, payload = {}) {
+  const attachmentType = String(type || '').trim().toLowerCase();
+  if (!['contact', 'location', 'poll', 'event'].includes(attachmentType)) {
+    return { attachmentType: '', attachmentPayload: null };
+  }
+
+  if (attachmentType === 'contact') {
+    const name = String(payload.name || '').trim().slice(0, 120);
+    const phoneNumber = String(payload.phoneNumber || '').trim().slice(0, 60);
+    if (!name && !phoneNumber) return { attachmentType: '', attachmentPayload: null };
+    return { attachmentType, attachmentPayload: { name, phoneNumber } };
+  }
+
+  if (attachmentType === 'location') {
+    const latitude = Number(payload.latitude);
+    const longitude = Number(payload.longitude);
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return { attachmentType: '', attachmentPayload: null };
+    }
+    return { attachmentType, attachmentPayload: { latitude, longitude } };
+  }
+
+  if (attachmentType === 'poll') {
+    const question = String(payload.question || '').trim().slice(0, 240);
+    const options = Array.isArray(payload.options)
+      ? payload.options
+          .map((option) => String(option || '').trim().slice(0, 120))
+          .filter(Boolean)
+          .slice(0, 8)
+      : [];
+    if (!question || options.length < 2) return { attachmentType: '', attachmentPayload: null };
+    return { attachmentType, attachmentPayload: { question, options } };
+  }
+
+  const title = String(payload.title || '').trim().slice(0, 160);
+  const date = String(payload.date || '').trim().slice(0, 80);
+  const time = String(payload.time || '').trim().slice(0, 80);
+  const description = String(payload.description || '').trim().slice(0, 500);
+  if (!title || !date || !time) return { attachmentType: '', attachmentPayload: null };
+  return { attachmentType, attachmentPayload: { title, date, time, description } };
 }
 
 const VALID_THEMES = new Set(['gold', 'emerald', 'sky', 'rose']);
@@ -256,6 +332,8 @@ async function replyForClient(message) {
     mediaName: replyMessage.mediaName || '',
     mediaMimeType: replyMessage.mediaMimeType || '',
     mediaSizeBytes: replyMessage.mediaSizeBytes || 0,
+    attachmentType: replyMessage.attachmentType || '',
+    attachmentPayload: replyMessage.attachmentPayload || null,
     timestamp: replyMessage.timestamp || replyMessage.createdAt,
     createdAt: replyMessage.createdAt,
     status: replyMessage.status || 'sent',
@@ -282,6 +360,8 @@ async function messageForClient(message) {
     mediaName: message.mediaName || '',
     mediaMimeType: message.mediaMimeType || '',
     mediaSizeBytes: message.mediaSizeBytes || 0,
+    attachmentType: message.attachmentType || '',
+    attachmentPayload: message.attachmentPayload || null,
     repliedTo: await replyForClient(message.repliedTo),
     timestamp: message.timestamp || message.createdAt,
     createdAt: message.createdAt,
@@ -520,13 +600,23 @@ router.get('/messages/:roomId', requireAfaPayAuth, async (req, res) => {
   return res.json(await Promise.all(visibleMessages.map(messageForClient)));
 });
 
-router.post('/messages/upload', requireAfaPayAuth, chatMediaUpload.single('file'), async (req, res) => {
+router.post('/messages/upload', requireAfaPayAuth, handleChatMediaUpload, async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'No chat media file uploaded.' });
   }
 
   try {
     const type = resolveChatUploadType(req.file, req.body?.type);
+    const sizeLimit = uploadSizeLimitFor(type);
+    if (req.file.size > sizeLimit) {
+      return res.status(400).json({
+        success: false,
+        message:
+          type === 'image'
+            ? 'Images must be 10MB or smaller.'
+            : 'Documents must be 25MB or smaller.',
+      });
+    }
     const result = await mediaStorage.upload(req.file, {
       folder: 'afapay-chat',
       type,
@@ -565,7 +655,11 @@ router.post('/messages', requireAfaPayAuth, async (req, res) => {
   const mediaName = String(req.body.mediaName || '').trim();
   const mediaMimeType = String(req.body.mediaMimeType || '').trim();
   const mediaSizeBytes = Number(req.body.mediaSizeBytes || 0);
-  if (!text && !imageUrl && !videoUrl && !audioUrl && !fileUrl) {
+  const { attachmentType, attachmentPayload } = normalizeStructuredAttachment(
+    req.body.attachmentType,
+    req.body.attachmentPayload,
+  );
+  if (!text && !imageUrl && !videoUrl && !audioUrl && !fileUrl && !attachmentType) {
     return res.status(400).json({ success: false, message: 'Message content is required.' });
   }
 
@@ -596,6 +690,8 @@ router.post('/messages', requireAfaPayAuth, async (req, res) => {
     mediaName: mediaName.slice(0, 255),
     mediaMimeType: mediaMimeType.slice(0, 120),
     mediaSizeBytes: Number.isFinite(mediaSizeBytes) && mediaSizeBytes > 0 ? mediaSizeBytes : 0,
+    attachmentType,
+    attachmentPayload,
     repliedTo: replyMessage?._id || null,
     timestamp: new Date(),
   });

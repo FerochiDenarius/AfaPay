@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -10,9 +10,14 @@ import '../models/chat_models.dart';
 import 'chat_media_editor_screen.dart';
 
 class ChatMediaPickerScreen extends StatefulWidget {
-  const ChatMediaPickerScreen({super.key, required this.recipientName});
+  const ChatMediaPickerScreen({
+    super.key,
+    required this.recipientName,
+    this.autoOpenDevicePicker = false,
+  });
 
   final String recipientName;
+  final bool autoOpenDevicePicker;
 
   @override
   State<ChatMediaPickerScreen> createState() => _ChatMediaPickerScreenState();
@@ -21,19 +26,20 @@ class ChatMediaPickerScreen extends StatefulWidget {
 class _ChatMediaPickerScreenState extends State<ChatMediaPickerScreen> {
   final _captionController = TextEditingController();
   final _picker = ImagePicker();
-  ChatMediaDraft? _selected;
 
-  static const _assetTiles = [
-    'UIdesignImages/mediaPicker2.jpeg',
-    'UIdesignImages/mainPageLightTheme.png',
-    'UIdesignImages/loginLightTheme.png',
-    'UIdesignImages/loginPage.png',
-    'UIdesignImages/logo.png',
-    'UIdesignImages/logoEmblem.png',
-    'UIdesignImages/registrationsPage.png',
-    'UIdesignImages/EmailEntryPage.png',
-    'UIdesignImages/EmailCodePage.png',
-  ];
+  bool _openingDeviceMedia = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.autoOpenDevicePicker) {
+      unawaited(
+        WidgetsBinding.instance.endOfFrame.then((_) {
+          if (mounted) return _pickDeviceMedia();
+        }),
+      );
+    }
+  }
 
   @override
   void dispose() {
@@ -42,21 +48,28 @@ class _ChatMediaPickerScreenState extends State<ChatMediaPickerScreen> {
   }
 
   Future<void> _pickDeviceMedia() async {
-    final media = await _picker.pickMedia();
-    if (media == null || !mounted) return;
+    if (_openingDeviceMedia) return;
+    setState(() => _openingDeviceMedia = true);
+    try {
+      final media = await _picker.pickMedia();
+      if (media == null || !mounted) return;
 
-    final mimeType = media.mimeType ?? '';
-    final type = mimeType.startsWith('video/')
-        ? ChatMediaType.video
-        : ChatMediaType.image;
-    final draft = ChatMediaDraft(
-      type: type,
-      filePath: media.path,
-      caption: _captionController.text.trim(),
-      name: media.name,
-      mimeType: media.mimeType,
-    );
-    await _openEditor(draft);
+      final type = mediaTypeForPickedFile(
+        mimeType: media.mimeType,
+        fileName: media.name,
+        filePath: media.path,
+      );
+      final draft = ChatMediaDraft(
+        type: type,
+        filePath: media.path,
+        caption: _captionController.text.trim(),
+        name: media.name,
+        mimeType: media.mimeType,
+      );
+      await _openEditor(draft);
+    } finally {
+      if (mounted) setState(() => _openingDeviceMedia = false);
+    }
   }
 
   Future<void> _openEditor(ChatMediaDraft draft) async {
@@ -73,21 +86,9 @@ class _ChatMediaPickerScreenState extends State<ChatMediaPickerScreen> {
     }
   }
 
-  void _selectAsset(String assetPath) {
-    setState(() {
-      _selected = ChatMediaDraft(
-        type: ChatMediaType.image,
-        assetPath: assetPath,
-        caption: _captionController.text.trim(),
-        name: assetPath.split('/').last,
-      );
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final colors = context.chatColors;
-    final selected = _selected;
 
     return Scaffold(
       backgroundColor: colors.background.withValues(alpha: 0.62),
@@ -129,17 +130,12 @@ class _ChatMediaPickerScreenState extends State<ChatMediaPickerScreen> {
                             ),
                             const Spacer(),
                             Text(
-                              'Recents',
+                              'Gallery',
                               style: TextStyle(
                                 color: colors.primaryText,
                                 fontSize: 30,
                                 fontWeight: FontWeight.w500,
                               ),
-                            ),
-                            Icon(
-                              Icons.arrow_drop_down_rounded,
-                              color: colors.icon,
-                              size: 34,
                             ),
                             const Spacer(),
                             Container(
@@ -166,28 +162,11 @@ class _ChatMediaPickerScreenState extends State<ChatMediaPickerScreen> {
                         ),
                       ),
                       Expanded(
-                        child: GridView.builder(
-                          padding: EdgeInsets.zero,
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 3,
-                                crossAxisSpacing: 3,
-                                mainAxisSpacing: 3,
-                              ),
-                          itemCount: _assetTiles.length + 1,
-                          itemBuilder: (context, index) {
-                            if (index == 0) {
-                              return _DeviceMediaTile(onTap: _pickDeviceMedia);
-                            }
-                            final asset = _assetTiles[index - 1];
-                            final isSelected = selected?.assetPath == asset;
-                            return _AssetMediaTile(
-                              assetPath: asset,
-                              selected: isSelected,
-                              selectedIndex: isSelected ? 1 : null,
-                              onTap: () => _selectAsset(asset),
-                            );
-                          },
+                        child: Center(
+                          child: _DeviceMediaTile(
+                            busy: _openingDeviceMedia,
+                            onTap: _pickDeviceMedia,
+                          ),
                         ),
                       ),
                       Container(
@@ -195,17 +174,6 @@ class _ChatMediaPickerScreenState extends State<ChatMediaPickerScreen> {
                         color: colors.backgroundSecondary,
                         child: Row(
                           children: [
-                            GestureDetector(
-                              onTap: selected == null
-                                  ? null
-                                  : () => _openEditor(
-                                      selected.copyWith(
-                                        caption: _captionController.text.trim(),
-                                      ),
-                                    ),
-                              child: _SelectedThumbnail(draft: selected),
-                            ),
-                            const SizedBox(width: 12),
                             Expanded(
                               child: Container(
                                 height: 58,
@@ -239,45 +207,22 @@ class _ChatMediaPickerScreenState extends State<ChatMediaPickerScreen> {
                               ),
                             ),
                             const SizedBox(width: 12),
-                            Container(
-                              width: 50,
-                              height: 50,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                  color: colors.icon,
-                                  width: 2,
-                                ),
-                              ),
-                              child: Text(
-                                selected == null ? '0' : '1',
-                                style: TextStyle(
-                                  color: colors.icon,
-                                  fontSize: 20,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
                             SizedBox.square(
                               dimension: 66,
                               child: IconButton(
-                                tooltip: 'Open media editor',
+                                tooltip: 'Open device gallery',
                                 style: IconButton.styleFrom(
                                   backgroundColor: colors.onAccentText,
                                   foregroundColor: colors.glassSurface,
                                   shape: const CircleBorder(),
                                 ),
-                                onPressed: selected == null
+                                onPressed: _openingDeviceMedia
                                     ? null
-                                    : () => _openEditor(
-                                        selected.copyWith(
-                                          caption: _captionController.text
-                                              .trim(),
-                                        ),
-                                      ),
-                                icon: const Icon(Icons.send_rounded, size: 34),
+                                    : _pickDeviceMedia,
+                                icon: const Icon(
+                                  Icons.photo_library_outlined,
+                                  size: 34,
+                                ),
                               ),
                             ),
                           ],
@@ -295,9 +240,26 @@ class _ChatMediaPickerScreenState extends State<ChatMediaPickerScreen> {
   }
 }
 
-class _DeviceMediaTile extends StatelessWidget {
-  const _DeviceMediaTile({required this.onTap});
+ChatMediaType mediaTypeForPickedFile({
+  String? mimeType,
+  String? fileName,
+  String? filePath,
+}) {
+  final normalizedMime = mimeType?.toLowerCase() ?? '';
+  if (normalizedMime.startsWith('video/')) return ChatMediaType.video;
+  if (normalizedMime.startsWith('image/')) return ChatMediaType.image;
 
+  final source = '${fileName ?? ''} ${filePath ?? ''}'.toLowerCase();
+  if (RegExp(r'\.(mp4|mov|m4v|webm|3gp|mkv)\b').hasMatch(source)) {
+    return ChatMediaType.video;
+  }
+  return ChatMediaType.image;
+}
+
+class _DeviceMediaTile extends StatelessWidget {
+  const _DeviceMediaTile({required this.busy, required this.onTap});
+
+  final bool busy;
   final VoidCallback onTap;
 
   @override
@@ -305,115 +267,26 @@ class _DeviceMediaTile extends StatelessWidget {
     final colors = context.chatColors;
 
     return InkWell(
-      onTap: onTap,
-      child: DecoratedBox(
+      onTap: busy ? null : onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 220,
+        height: 180,
         decoration: BoxDecoration(
           color: colors.strongGlassSurface,
           border: Border.all(color: colors.border),
+          borderRadius: BorderRadius.circular(8),
         ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.photo_library_outlined, color: colors.accent, size: 36),
-            const SizedBox(height: 8),
-            Text(
-              'Device media',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: colors.primaryText,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
+        child: Center(
+          child: busy
+              ? CircularProgressIndicator(color: colors.accent)
+              : Icon(
+                  Icons.photo_library_outlined,
+                  color: colors.accent,
+                  size: 64,
+                ),
         ),
       ),
-    );
-  }
-}
-
-class _AssetMediaTile extends StatelessWidget {
-  const _AssetMediaTile({
-    required this.assetPath,
-    required this.selected,
-    required this.onTap,
-    this.selectedIndex,
-  });
-
-  final String assetPath;
-  final bool selected;
-  final VoidCallback onTap;
-  final int? selectedIndex;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.chatColors;
-
-    return InkWell(
-      onTap: onTap,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          Image.asset(assetPath, fit: BoxFit.cover),
-          if (selected)
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border.all(color: colors.accent, width: 3),
-              ),
-            ),
-          if (selectedIndex != null)
-            Align(
-              alignment: Alignment.topRight,
-              child: Container(
-                width: 34,
-                height: 34,
-                margin: const EdgeInsets.all(8),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: colors.onAccentText,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: colors.glassSurface, width: 2),
-                ),
-                child: Text(
-                  selectedIndex.toString(),
-                  style: TextStyle(
-                    color: colors.glassSurface,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SelectedThumbnail extends StatelessWidget {
-  const _SelectedThumbnail({required this.draft});
-
-  final ChatMediaDraft? draft;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.chatColors;
-    final item = draft;
-
-    return Container(
-      width: 56,
-      height: 56,
-      decoration: BoxDecoration(
-        color: colors.composerButtonSurface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.border),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: item == null
-          ? Icon(Icons.photo_outlined, color: colors.mutedIcon)
-          : item.filePath != null
-          ? Image.file(File(item.filePath!), fit: BoxFit.cover)
-          : Image.asset(item.assetPath!, fit: BoxFit.cover),
     );
   }
 }

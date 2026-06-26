@@ -1,3 +1,5 @@
+import 'chat_attachment.dart';
+
 class ChatParticipant {
   const ChatParticipant({
     required this.id,
@@ -142,6 +144,8 @@ class ChatMessage {
     this.mediaName,
     this.mediaMimeType,
     this.mediaSizeBytes = 0,
+    this.attachmentType,
+    this.attachmentPayload,
     this.status,
     this.repliedTo,
     this.createdAt,
@@ -160,6 +164,8 @@ class ChatMessage {
   final String? mediaName;
   final String? mediaMimeType;
   final int mediaSizeBytes;
+  final String? attachmentType;
+  final ChatAttachment? attachmentPayload;
   final String? status;
   final ChatMessage? repliedTo;
   final DateTime? createdAt;
@@ -192,6 +198,13 @@ class ChatMessage {
       mediaName: _nullableString(json['mediaName']),
       mediaMimeType: _nullableString(json['mediaMimeType']),
       mediaSizeBytes: _int(json['mediaSizeBytes']),
+      attachmentType: _nullableString(json['attachmentType']),
+      attachmentPayload: chatAttachmentFromPayload(
+        type: _string(json['attachmentType']),
+        payload: json['attachmentPayload'] is Map<String, dynamic>
+            ? json['attachmentPayload'] as Map<String, dynamic>
+            : null,
+      ),
       status: _nullableString(json['status']),
       repliedTo: repliedTo is Map<String, dynamic>
           ? ChatMessage.fromJson(repliedTo)

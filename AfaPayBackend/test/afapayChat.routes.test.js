@@ -17,6 +17,8 @@ const originalChatRoomFindOne = ChatRoom.findOne;
 const originalChatSettingFindOne = ChatSetting.findOne;
 const originalChatSettingFindOneAndUpdate = ChatSetting.findOneAndUpdate;
 const originalMessageFind = Message.find;
+const originalMessageCreate = Message.create;
+const originalMessageFindById = Message.findById;
 
 process.env.ACCESS_TOKEN_SECRET = 'test-access-token-secret-with-enough-length';
 
@@ -64,6 +66,8 @@ test.afterEach(() => {
   ChatSetting.findOne = originalChatSettingFindOne;
   ChatSetting.findOneAndUpdate = originalChatSettingFindOneAndUpdate;
   Message.find = originalMessageFind;
+  Message.create = originalMessageCreate;
+  Message.findById = originalMessageFindById;
 });
 
 test('username search returns matching AfaPay users', async () => {
@@ -260,5 +264,86 @@ test('clear chat only hides messages for the authenticated user', async () => {
     });
     assert.equal(userBMessagesAfter.status, 200);
     assert.equal((await userBMessagesAfter.json()).length, 1);
+  });
+});
+
+test('message endpoint stores structured location attachments', async () => {
+  const userAId = '507f1f77bcf86cd799439011';
+  const userBId = '507f1f77bcf86cd799439012';
+  const roomId = '507f1f77bcf86cd799439013';
+  const messageId = '507f1f77bcf86cd799439014';
+  const users = new Map([
+    [userAId, { _id: userAId, username: 'bright', blockedUsers: [] }],
+    [userBId, { _id: userBId, username: 'ama', blockedUsers: [] }],
+  ]);
+  const room = {
+    _id: roomId,
+    roomType: 'private',
+    participants: [userAId, userBId],
+    save: async () => room,
+  };
+  let createdMessage = null;
+
+  function userQuery(user) {
+    return {
+      then: (resolve, reject) => Promise.resolve(user).then(resolve, reject),
+      select: () => ({
+        lean: async () => user,
+      }),
+    };
+  }
+
+  User.findById = (id) => userQuery(users.get(id.toString()) || null);
+  ChatRoom.findOne = (query) => {
+    const participant = query.participants?.toString();
+    return Promise.resolve(
+      query._id?.toString() === roomId &&
+        [userAId, userBId].includes(participant)
+        ? room
+        : null,
+    );
+  };
+  Message.create = async (payload) => {
+    createdMessage = {
+      _id: messageId,
+      ...payload,
+      createdAt: payload.timestamp,
+      status: 'sent',
+    };
+    return createdMessage;
+  };
+  Message.findById = () => ({
+    populate: () => ({
+      lean: async () => createdMessage,
+    }),
+    lean: async () => createdMessage,
+  });
+
+  await withServer(createApp(), async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/messages`, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${tokenFor(userAId)}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        roomId,
+        attachmentType: 'location',
+        attachmentPayload: {
+          latitude: 5.603717,
+          longitude: -0.186964,
+        },
+      }),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 201);
+    assert.equal(body.attachmentType, 'location');
+    assert.deepEqual(body.attachmentPayload, {
+      latitude: 5.603717,
+      longitude: -0.186964,
+    });
+    assert.equal(room.lastMessage, 'Location');
   });
 });

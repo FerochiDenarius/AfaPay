@@ -68,6 +68,15 @@ const afapayMessageSchema = new Schema(
       type: Number,
       default: 0,
     },
+    attachmentType: {
+      type: String,
+      enum: ['contact', 'location', 'poll', 'event', ''],
+      default: '',
+    },
+    attachmentPayload: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
     repliedTo: {
       type: Schema.Types.ObjectId,
       ref: 'AfaPayMessage',

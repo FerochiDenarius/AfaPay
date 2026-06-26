@@ -1,8 +1,10 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart' as http_parser;
 
 import '../../../core/config/api_config.dart';
 import '../../../core/security/auth_token_storage.dart';
+import '../models/chat_attachment.dart';
 import '../models/chat_models.dart';
 import '../models/chat_room_settings.dart';
 
@@ -166,10 +168,15 @@ class ChatRepository {
   Future<ChatMediaUpload> uploadChatMedia({
     required String filePath,
     required ChatMediaType type,
+    String? fileName,
+    String? mimeType,
   }) async {
     final json = await _sendMultipart(
       '/api/messages/upload',
       filePath: filePath,
+      fileName: fileName,
+      mimeType: mimeType,
+      type: type,
       fields: {'type': chatMediaTypeName(type)},
     );
     if (json is! Map<String, dynamic>) {
@@ -204,6 +211,74 @@ class ChatRepository {
       throw const ChatApiException('Unable to send media message.');
     }
     return ChatMessage.fromJson(json);
+  }
+
+  Future<ChatMessage> sendStructuredAttachmentMessage({
+    required String roomId,
+    required ChatAttachment attachment,
+    String text = '',
+    String? repliedToMessageId,
+  }) async {
+    final attachmentType = structuredAttachmentTypeName(attachment);
+    final attachmentPayload = chatAttachmentPayload(attachment);
+    if (attachmentType.isEmpty || attachmentPayload == null) {
+      throw const ChatApiException('Unsupported attachment type.');
+    }
+    final json = await _sendJson('/api/messages', {
+      'roomId': roomId,
+      'text': text.trim(),
+      'attachmentType': attachmentType,
+      'attachmentPayload': attachmentPayload,
+      if (repliedToMessageId != null && repliedToMessageId.isNotEmpty)
+        'repliedTo': repliedToMessageId,
+    });
+    if (json is! Map<String, dynamic>) {
+      throw const ChatApiException('Unable to send attachment.');
+    }
+    return ChatMessage.fromJson(json);
+  }
+
+  Future<ChatMessage> uploadAndSendAttachmentMessage({
+    required String roomId,
+    required ChatAttachment attachment,
+    String text = '',
+    String? repliedToMessageId,
+  }) async {
+    final upload = switch (attachment) {
+      DocumentAttachment(:final cachePath, :final fileName, :final mimeType) =>
+        await uploadChatMedia(
+          filePath: _requiredUploadPath(cachePath),
+          type: ChatMediaType.file,
+          fileName: fileName,
+          mimeType: mimeType,
+        ),
+      ImageAttachment(:final cachePath, :final fileName, :final mimeType) =>
+        await uploadChatMedia(
+          filePath: _requiredUploadPath(cachePath),
+          type: ChatMediaType.image,
+          fileName: fileName,
+          mimeType: mimeType,
+        ),
+      AudioAttachment(:final path, :final mimeType) => await uploadChatMedia(
+        filePath: path,
+        type: ChatMediaType.audio,
+        fileName: 'voice-message.m4a',
+        mimeType: mimeType,
+      ),
+      ContactAttachment() ||
+      LocationAttachment() ||
+      PollAttachment() ||
+      EventAttachment() => throw const ChatApiException(
+        'Attachment does not need media upload.',
+      ),
+    };
+
+    return sendMediaMessage(
+      roomId: roomId,
+      upload: upload,
+      text: text,
+      repliedToMessageId: repliedToMessageId,
+    );
   }
 
   Future<void> markAsRead(String roomId) async {
@@ -272,6 +347,9 @@ class ChatRepository {
     String path, {
     required String filePath,
     required Map<String, String> fields,
+    String? fileName,
+    String? mimeType,
+    ChatMediaType? type,
   }) async {
     final token = await _tokenStorage.readAccessToken();
     if (token == null || token.isEmpty) {
@@ -283,6 +361,9 @@ class ChatRepository {
       token: token,
       fields: fields,
       filePath: filePath,
+      fileName: fileName,
+      mimeType: mimeType,
+      type: type,
     );
 
     if (response.statusCode == 401 || response.statusCode == 403) {
@@ -296,6 +377,9 @@ class ChatRepository {
         token: refreshed.accessToken,
         fields: fields,
         filePath: filePath,
+        fileName: fileName,
+        mimeType: mimeType,
+        type: type,
       );
       if (response.statusCode == 401 || response.statusCode == 403) {
         await _tokenStorage.clear();
@@ -365,6 +449,9 @@ class ChatRepository {
     required String token,
     required Map<String, String> fields,
     required String filePath,
+    String? fileName,
+    String? mimeType,
+    ChatMediaType? type,
   }) async {
     final request = http.MultipartRequest('POST', Uri.parse('$_baseUrl$path'))
       ..headers.addAll({
@@ -376,7 +463,12 @@ class ChatRepository {
         await http.MultipartFile.fromPath(
           'file',
           filePath,
-          filename: _fileName(filePath),
+          filename: _safeFileName(fileName) ?? _fileName(filePath),
+          contentType: _contentTypeFor(
+            mimeType: mimeType,
+            fileName: fileName ?? filePath,
+            type: type,
+          ),
         ),
       );
 
@@ -450,4 +542,62 @@ String _fileName(String path) {
   final normalized = path.replaceAll('\\', '/');
   final name = normalized.split('/').last;
   return name.isEmpty ? 'upload' : name;
+}
+
+String? _safeFileName(String? value) {
+  final trimmed = value?.trim();
+  if (trimmed == null || trimmed.isEmpty) return null;
+  return trimmed.replaceAll(RegExp(r'[/\\]+'), '_');
+}
+
+String _requiredUploadPath(String? path) {
+  final value = path?.trim();
+  if (value == null || value.isEmpty) {
+    throw const ChatApiException('Attachment file is not available.');
+  }
+  return value;
+}
+
+http_parser.MediaType? _contentTypeFor({
+  String? mimeType,
+  String? fileName,
+  ChatMediaType? type,
+}) {
+  final normalized = mimeType?.trim().toLowerCase();
+  if (normalized != null && normalized.contains('/')) {
+    final parts = normalized.split('/');
+    if (parts.length == 2 && parts.every((part) => part.isNotEmpty)) {
+      return http_parser.MediaType(parts[0], parts[1]);
+    }
+  }
+
+  final extension = (fileName ?? '').split('?').first.toLowerCase();
+  final inferred = switch (extension.split('.').last) {
+    'jpg' || 'jpeg' => 'image/jpeg',
+    'png' => 'image/png',
+    'webp' => 'image/webp',
+    'gif' => 'image/gif',
+    'heic' => 'image/heic',
+    'mp4' => 'video/mp4',
+    'mov' => 'video/quicktime',
+    'webm' => 'video/webm',
+    'm4a' => 'audio/mp4',
+    'mp3' => 'audio/mpeg',
+    'wav' => 'audio/wav',
+    'pdf' => 'application/pdf',
+    'txt' => 'text/plain',
+    'zip' => 'application/zip',
+    'doc' => 'application/msword',
+    'docx' =>
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    _ => switch (type) {
+      ChatMediaType.video => 'video/mp4',
+      ChatMediaType.audio => 'audio/mp4',
+      ChatMediaType.file => 'application/octet-stream',
+      ChatMediaType.image || null => 'image/jpeg',
+    },
+  };
+
+  final parts = inferred.split('/');
+  return http_parser.MediaType(parts[0], parts[1]);
 }

@@ -11,6 +11,7 @@ class AttachmentMenuPopup extends StatelessWidget {
     required this.onLocation,
     required this.onPoll,
     required this.onEvent,
+    required this.onAudioRecording,
   });
 
   final VoidCallback onDocument;
@@ -19,6 +20,7 @@ class AttachmentMenuPopup extends StatelessWidget {
   final VoidCallback onLocation;
   final VoidCallback onPoll;
   final VoidCallback onEvent;
+  final VoidCallback onAudioRecording;
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +78,11 @@ class AttachmentMenuPopup extends StatelessWidget {
                 label: 'Event',
                 icon: Icons.event_outlined,
                 onTap: onEvent,
+              ),
+              _AttachmentMenuItem(
+                label: 'Audio Recording',
+                icon: Icons.mic_none,
+                onTap: onAudioRecording,
               ),
             ],
           ),
@@ -141,7 +148,7 @@ class _AttachmentMenuItem extends StatelessWidget {
               const SizedBox(height: 7),
               Text(
                 label,
-                maxLines: 1,
+                maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 textAlign: TextAlign.center,
                 style: TextStyle(

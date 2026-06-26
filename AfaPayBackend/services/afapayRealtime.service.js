@@ -89,6 +89,17 @@ function initAfaPayRealtime(server) {
       });
     });
 
+    socket.on('userOnline', async () => {
+      await onlineService.markUserOnline({
+        io,
+        User,
+        socket,
+        userId: auth.userId,
+      }).catch((error) => {
+        console.error('[AfaPayRealtime] userOnline failed:', error.message);
+      });
+    });
+
     socket.on('userOffline', async () => {
       await onlineService.markUserOffline({
         io,
