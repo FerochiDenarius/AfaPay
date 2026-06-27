@@ -81,7 +81,7 @@ class _ChatListScreenState extends State<ChatListScreen>
       });
       _realtime.requestOnlineUsers();
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -171,7 +171,7 @@ class _ChatListScreenState extends State<ChatListScreen>
       if (!mounted) return;
       context.push('/chat/${chat.id}', extra: chat).then((_) => _loadChats());
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       _showError(error.message);
     } catch (_) {
@@ -319,7 +319,7 @@ class _ChatListScreenState extends State<ChatListScreen>
       setState(() => _groups = [group, ..._groups]);
       context.push('/chat/${group.id}', extra: group).then((_) => _loadChats());
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       _showError(error.message);
     } catch (_) {

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../../../core/config/api_config.dart';
 import '../../../core/security/auth_token_storage.dart';
+import '../../auth/services/auth_service.dart';
 import '../models/dashboard_summary.dart';
 import '../models/transaction_preview.dart';
 import '../models/user_profile.dart';
@@ -77,12 +78,9 @@ class HttpDashboardRepository implements DashboardRepository {
 
   @override
   Future<DashboardSummary> getSummary() async {
-    final responses = await Future.wait([
-      _getJson('/api/user/profile'),
-      _getJson('/api/transactions/recent'),
-    ]);
+    final profileJson = await _getJson('/api/user/profile');
+    final transactionsJson = await _getJson('/api/transactions/recent');
 
-    final transactionsJson = responses[1];
     final transactions = transactionsJson is List
         ? transactionsJson
               .whereType<Map<String, dynamic>>()
@@ -91,7 +89,7 @@ class HttpDashboardRepository implements DashboardRepository {
         : <TransactionPreview>[];
 
     return DashboardSummary(
-      profile: UserProfile.fromJson(responses[0] as Map<String, dynamic>),
+      profile: UserProfile.fromJson(profileJson as Map<String, dynamic>),
       recentTransactions: transactions,
     );
   }
@@ -108,19 +106,21 @@ class HttpDashboardRepository implements DashboardRepository {
       throw const AuthenticationExpiredException();
     }
 
-    final response = await _client
-        .get(
-          Uri.parse('$_baseUrl$path'),
-          headers: {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-        )
-        .timeout(const Duration(seconds: 20));
+    var response = await _sendGet(path, token);
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      await _tokenStorage.clear();
-      throw const AuthenticationExpiredException();
+      final refreshed = await AuthService(
+        client: _client,
+        baseUrl: _baseUrl,
+        tokenStorage: _tokenStorage,
+      ).refreshSession();
+      if (refreshed == null) {
+        throw const AuthenticationExpiredException();
+      }
+      response = await _sendGet(path, refreshed.accessToken);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        throw const AuthenticationExpiredException();
+      }
     }
 
     Object? json;
@@ -137,6 +137,18 @@ class HttpDashboardRepository implements DashboardRepository {
       throw DashboardApiException(message ?? 'Dashboard request failed.');
     }
     return json;
+  }
+
+  Future<http.Response> _sendGet(String path, String token) {
+    return _client
+        .get(
+          Uri.parse('$_baseUrl$path'),
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        )
+        .timeout(const Duration(seconds: 20));
   }
 }
 

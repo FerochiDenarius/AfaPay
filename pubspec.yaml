@@ -69,7 +69,12 @@ flutter:
   assets:
     - UIdesignImages/loginPage.png
     - UIdesignImages/loginLightTheme.png
+    - UIdesignImages/getStartedPage.jpeg
+    - UIdesignImages/getStartedPageLightTheme.jpeg
+    - UIdesignImages/afa_onboarding_africa_dark.png
+    - UIdesignImages/afa_onboarding_africa_light.png
     - UIdesignImages/mainPageLightTheme.png
+    - UIdesignImages/appIcon.png
     - UIdesignImages/mediaPicker.jpeg
     - UIdesignImages/mediaPicker2.jpeg
     - UIdesignImages/registrationsPage.png

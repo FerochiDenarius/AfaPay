@@ -7,6 +7,7 @@ import '../../features/auth/pages/pin_setup_screen.dart';
 import '../../features/auth/pages/registration_page.dart';
 import '../../features/auth/screens/email_otp_verification_screen.dart';
 import '../../features/auth/screens/email_verification_entry_screen.dart';
+import '../../features/auth/screens/get_started_screen.dart';
 import '../../features/auth/screens/onboarding_complete_screen.dart';
 import '../../features/chat/models/chat_models.dart';
 import '../../features/chat/presentation/call_landing_screen.dart';
@@ -21,6 +22,11 @@ import '../../screens/login_screen.dart';
 final appRouter = GoRouter(
   initialLocation: ApiConfig.initialRoute,
   routes: [
+    GoRoute(
+      path: '/get-started',
+      name: 'get-started',
+      builder: (context, state) => const GetStartedScreen(),
+    ),
     GoRoute(
       path: '/dashboard',
       name: 'dashboard',

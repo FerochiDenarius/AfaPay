@@ -55,6 +55,64 @@ class SecurityRepository {
     );
   }
 
+  Future<void> reauthenticateWithPin(String pin) async {
+    final accessToken = await _tokenStorage.readAccessToken();
+    final refreshToken = await _tokenStorage.readRefreshToken();
+    final deviceId = await _tokenStorage.readDeviceId();
+    if (accessToken == null || accessToken.isEmpty) {
+      throw const SecurityException('Please login before continuing.');
+    }
+
+    final response = await _client
+        .post(
+          Uri.parse('$_baseUrl/api/security/pin/reauth'),
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $accessToken',
+          },
+          body: jsonEncode({
+            'pin': pin,
+            if (refreshToken != null && refreshToken.isNotEmpty)
+              'refreshToken': refreshToken,
+            if (deviceId != null && deviceId.isNotEmpty) 'deviceId': deviceId,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+
+    Object? decoded;
+    try {
+      decoded = response.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body);
+    } on FormatException {
+      throw const SecurityException('The server returned invalid JSON.');
+    }
+    final json = decoded is Map<String, dynamic>
+        ? decoded
+        : <String, dynamic>{};
+    if (response.statusCode < 200 ||
+        response.statusCode >= 300 ||
+        json['success'] != true) {
+      throw SecurityException(
+        json['message']?.toString() ?? 'PIN reauthentication failed.',
+      );
+    }
+
+    final access = json['accessToken']?.toString() ?? '';
+    final refresh = json['refreshToken']?.toString() ?? '';
+    if (access.isEmpty || refresh.isEmpty) {
+      throw const SecurityException('The server did not return a session.');
+    }
+    await _tokenStorage.saveTokens(
+      AuthTokens(accessToken: access, refreshToken: refresh),
+    );
+    final refreshedDeviceId = json['deviceId']?.toString();
+    if (refreshedDeviceId != null && refreshedDeviceId.isNotEmpty) {
+      await _tokenStorage.saveDeviceId(refreshedDeviceId);
+    }
+  }
+
   Future<void> setBiometricsEnabled(bool enabled) async {
     await _request(
       'POST',
@@ -95,24 +153,31 @@ class SecurityRepository {
       'Authorization': 'Bearer $token',
     };
     final response = switch (method) {
-      'GET' => await _client
-          .get(uri, headers: headers)
-          .timeout(const Duration(seconds: 20)),
-      'DELETE' => await _client
-          .delete(uri, headers: headers)
-          .timeout(const Duration(seconds: 20)),
-      _ => await _client
-          .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
-          .timeout(const Duration(seconds: 20)),
+      'GET' =>
+        await _client
+            .get(uri, headers: headers)
+            .timeout(const Duration(seconds: 20)),
+      'DELETE' =>
+        await _client
+            .delete(uri, headers: headers)
+            .timeout(const Duration(seconds: 20)),
+      _ =>
+        await _client
+            .post(uri, headers: headers, body: jsonEncode(body ?? const {}))
+            .timeout(const Duration(seconds: 20)),
     };
 
     Object? decoded;
     try {
-      decoded = response.body.isEmpty ? <String, dynamic>{} : jsonDecode(response.body);
+      decoded = response.body.isEmpty
+          ? <String, dynamic>{}
+          : jsonDecode(response.body);
     } on FormatException {
       throw const SecurityException('The server returned invalid JSON.');
     }
-    final json = decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    final json = decoded is Map<String, dynamic>
+        ? decoded
+        : <String, dynamic>{};
     if (response.statusCode < 200 || response.statusCode >= 300) {
       if (allowSecurityFailure &&
           (response.statusCode == 401 || response.statusCode == 423)) {

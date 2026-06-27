@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../../../core/config/api_config.dart';
 import '../../../core/security/auth_token_storage.dart';
+import '../../auth/services/auth_service.dart';
 import '../models/wallet_balance.dart';
 import 'dashboard_repository.dart';
 
@@ -41,19 +42,21 @@ class HttpWalletRepository implements WalletRepository {
       throw const AuthenticationExpiredException();
     }
 
-    final response = await _client
-        .get(
-          Uri.parse('$_baseUrl/api/wallet/balance'),
-          headers: {
-            'Accept': 'application/json',
-            'Authorization': 'Bearer $token',
-          },
-        )
-        .timeout(const Duration(seconds: 20));
+    var response = await _sendBalanceRequest(token);
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      await _tokenStorage.clear();
-      throw const AuthenticationExpiredException();
+      final refreshed = await AuthService(
+        client: _client,
+        baseUrl: _baseUrl,
+        tokenStorage: _tokenStorage,
+      ).refreshSession();
+      if (refreshed == null) {
+        throw const AuthenticationExpiredException();
+      }
+      response = await _sendBalanceRequest(refreshed.accessToken);
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        throw const AuthenticationExpiredException();
+      }
     }
 
     Map<String, dynamic> json;
@@ -69,5 +72,17 @@ class HttpWalletRepository implements WalletRepository {
       );
     }
     return WalletBalance.fromJson(json);
+  }
+
+  Future<http.Response> _sendBalanceRequest(String token) {
+    return _client
+        .get(
+          Uri.parse('$_baseUrl/api/wallet/balance'),
+          headers: {
+            'Accept': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        )
+        .timeout(const Duration(seconds: 20));
   }
 }

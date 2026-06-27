@@ -28,19 +28,14 @@ class _EnterPinScreenState extends State<EnterPinScreen> {
     if (_loading || _pin.length < 4) return;
     setState(() => _loading = true);
     try {
-      final result = await SecurityRepository().verifyPin(_pin);
+      await SecurityRepository().reauthenticateWithPin(_pin);
       if (!mounted) return;
-      if (result.success) {
-        context.go('/dashboard');
-        return;
-      }
-      final message = result.lockedUntil == null
-          ? 'Incorrect PIN. Attempt ${result.failedCount} of 5.'
-          : 'PIN locked. Try again later.';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      context.go('/dashboard');
     } on SecurityException catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -72,7 +67,10 @@ class _EnterPinScreenState extends State<EnterPinScreen> {
                     const Text(
                       'Enter PIN',
                       textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
+                      style: TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                     const SizedBox(height: 28),
                     TextField(
@@ -98,16 +96,23 @@ class _EnterPinScreenState extends State<EnterPinScreen> {
                     SizedBox(
                       height: 58,
                       child: FilledButton(
-                        onPressed: _pin.length >= 4 && !_loading ? _verify : null,
+                        onPressed: _pin.length >= 4 && !_loading
+                            ? _verify
+                            : null,
                         style: FilledButton.styleFrom(
                           backgroundColor: _gold,
                           foregroundColor: Colors.black,
                         ),
                         child: _loading
-                            ? const CircularProgressIndicator(color: Colors.black)
+                            ? const CircularProgressIndicator(
+                                color: Colors.black,
+                              )
                             : const Text(
                                 'Unlock',
-                                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                       ),
                     ),

@@ -156,7 +156,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       if (!mounted) return;
       setState(() => _settings = settings);
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on Object {
       // Settings are not critical for opening the room.
     }
@@ -178,7 +178,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       setState(() => _settings = saved);
       if (reloadMessages) await _loadMessages();
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       _showTemporaryAction(error.message);
       unawaited(_loadSettings());
@@ -353,7 +353,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       });
       _showTemporaryAction('Chat cleared.');
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       _showTemporaryAction(error.message);
     } on Object {
@@ -377,7 +377,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _showTemporaryAction('${participant.username} blocked.');
       context.go('/chats');
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       _showTemporaryAction(error.message);
     } on Object {
@@ -400,7 +400,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       if (!mounted) return;
       _showTemporaryAction('Report sent.');
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       _showTemporaryAction(error.message);
     } on Object {
@@ -493,7 +493,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _scrollToBottom();
       unawaited(_repository.markAsRead(widget.roomId));
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       if (!mounted) return;
       setState(() {
@@ -560,7 +560,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       });
       _refreshPresence();
     } on ChatAuthExpiredException {
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       _markMessageFailed(optimisticId);
       _showTemporaryAction(error.message);
@@ -635,7 +635,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       });
     } on ChatAuthExpiredException {
       _markMessageFailed(localId);
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       if (!mounted) return;
       _markMessageFailed(localId);
@@ -894,7 +894,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       });
     } on ChatAuthExpiredException {
       _markMessageFailed(localId);
-      if (mounted) context.go('/login');
+      if (mounted) context.go('/enter-pin');
     } on ChatApiException catch (error) {
       if (!mounted) return;
       _markMessageFailed(localId);

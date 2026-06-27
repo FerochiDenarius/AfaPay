@@ -103,6 +103,88 @@ async function requireAuth(req, res, next) {
   }
 }
 
+async function requireReauthIdentity(req, res, next) {
+  try {
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+    if (!token) {
+      return res.status(401).json({ success: false, message: 'Authentication required.' });
+    }
+    const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, {
+      issuer: 'afapay',
+      audience: 'afapay-mobile',
+      ignoreExpiration: true,
+    });
+    const user = await User.findById(decoded.userId || decoded.sub).select(
+      '_id username email firstName lastName',
+    );
+    if (!user) {
+      return res.status(401).json({ success: false, message: 'User not found.' });
+    }
+    req.user = user;
+    req.authDeviceId = normalizeText(req.body.deviceId || decoded.deviceId || req.headers['x-device-id'], 128);
+    return next();
+  } catch (_) {
+    return res.status(401).json({ success: false, message: 'Full authentication is required.' });
+  }
+}
+
+async function handlePinReauth(req, res) {
+  const pin = String(req.body.pin || '');
+  const deviceId = normalizeText(req.body.deviceId || req.authDeviceId, 128);
+  const suppliedRefreshToken = String(req.body.refreshToken || '').trim();
+  let decodedRefreshToken;
+  try {
+    decodedRefreshToken = jwt.verify(suppliedRefreshToken, process.env.REFRESH_TOKEN_SECRET, {
+      issuer: 'afapay',
+      audience: 'afapay-mobile',
+    });
+  } catch (_) {
+    decodedRefreshToken = null;
+  }
+  const credential = await PinCredential.findOne({ userId: req.user._id });
+  const device = await UserDevice.findOne({ userId: req.user._id, deviceId, revoked: false });
+  const storedRefreshToken = decodedRefreshToken
+    ? await RefreshToken.findOne({
+        userId: req.user._id,
+        deviceId,
+        tokenHash: hashCode(suppliedRefreshToken),
+        revoked: false,
+        expiresAt: { $gt: new Date() },
+      })
+    : null;
+  const refreshTokenMatchesDevice =
+    decodedRefreshToken &&
+    String(decodedRefreshToken.userId || decodedRefreshToken.sub) === req.user._id.toString() &&
+    normalizeText(decodedRefreshToken.deviceId, 128) === deviceId &&
+    storedRefreshToken;
+  if (
+    !credential ||
+    !device ||
+    !refreshTokenMatchesDevice ||
+    !(await verifySecret(credential.pinHash, pin))
+  ) {
+    await audit({
+      userId: req.user._id,
+      eventType: 'pin_reauth',
+      status: 'failed',
+      req,
+      deviceId,
+    });
+    return res.status(401).json({ success: false, message: 'Full authentication is required.' });
+  }
+  await RefreshToken.updateMany(
+    { userId: req.user._id, deviceId, revoked: false },
+    { $set: { revoked: true, revokedAt: new Date() } },
+  );
+  const tokens = issueTokens(req.user, deviceId);
+  await storeRefreshToken({ user: req.user, deviceId, refreshToken: tokens.refreshToken });
+  await audit({ userId: req.user._id, eventType: 'pin_reauth', req, deviceId });
+  return res.status(200).json({ success: true, deviceId, ...tokens });
+}
+
+router.post('/pin/reauth', requireReauthIdentity, handlePinReauth);
+
 router.use(requireAuth);
 
 router.post('/device/register', async (req, res) => {
@@ -233,31 +315,6 @@ router.post('/pin/verify', async (req, res) => {
   await attempt.save();
   await audit({ userId: req.user._id, eventType: 'pin_verify', req, deviceId: req.authDeviceId });
   return res.status(200).json({ success: true });
-});
-
-router.post('/pin/reauth', async (req, res) => {
-  const pin = String(req.body.pin || '');
-  const deviceId = normalizeText(req.body.deviceId || req.authDeviceId, 128);
-  const credential = await PinCredential.findOne({ userId: req.user._id });
-  const device = await UserDevice.findOne({ userId: req.user._id, deviceId, revoked: false });
-  if (!credential || !device || !(await verifySecret(credential.pinHash, pin))) {
-    await audit({
-      userId: req.user._id,
-      eventType: 'pin_reauth',
-      status: 'failed',
-      req,
-      deviceId,
-    });
-    return res.status(401).json({ success: false, message: 'Full authentication is required.' });
-  }
-  await RefreshToken.updateMany(
-    { userId: req.user._id, deviceId, revoked: false },
-    { $set: { revoked: true, revokedAt: new Date() } },
-  );
-  const tokens = issueTokens(req.user, deviceId);
-  await storeRefreshToken({ user: req.user, deviceId, refreshToken: tokens.refreshToken });
-  await audit({ userId: req.user._id, eventType: 'pin_reauth', req, deviceId });
-  return res.status(200).json({ success: true, deviceId, ...tokens });
 });
 
 router.post('/biometrics', async (req, res) => {

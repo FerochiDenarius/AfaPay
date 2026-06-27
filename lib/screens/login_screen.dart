@@ -493,11 +493,16 @@ class _SectionDivider extends StatelessWidget {
     return Row(
       children: [
         Expanded(child: Divider(color: palette.divider)),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Text(
-            palette.isLight ? "Don’t have an account?" : 'or continue with',
-            style: TextStyle(color: palette.secondaryText, fontSize: 15),
+        Flexible(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                palette.isLight ? "Don’t have an account?" : 'or continue with',
+                style: TextStyle(color: palette.secondaryText, fontSize: 15),
+              ),
+            ),
           ),
         ),
         Expanded(child: Divider(color: palette.divider)),

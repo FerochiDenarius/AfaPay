@@ -174,6 +174,59 @@ class AuthService {
     return result;
   }
 
+  Future<AuthTokens?> refreshSession() async {
+    if (_useMockAuth) {
+      const tokens = AuthTokens(
+        accessToken: 'mock-access-token',
+        refreshToken: 'mock-refresh-token',
+      );
+      await _tokenStorage.saveTokens(tokens);
+      return tokens;
+    }
+
+    final refreshToken = await _tokenStorage.readRefreshToken();
+    final deviceId = await _tokenStorage.readDeviceId();
+    if (refreshToken == null || refreshToken.isEmpty) return null;
+
+    final response = await _client
+        .post(
+          Uri.parse('$_baseUrl/api/afapay/auth/refresh'),
+          headers: const {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'refreshToken': refreshToken,
+            if (deviceId != null && deviceId.isNotEmpty) 'deviceId': deviceId,
+          }),
+        )
+        .timeout(const Duration(seconds: 20));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) return null;
+
+    Object? decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } on FormatException {
+      return null;
+    }
+    if (decoded is! Map<String, dynamic> || decoded['success'] != true) {
+      return null;
+    }
+
+    final tokens = AuthTokens(
+      accessToken: decoded['accessToken']?.toString() ?? '',
+      refreshToken: decoded['refreshToken']?.toString() ?? '',
+    );
+    if (tokens.accessToken.isEmpty || tokens.refreshToken.isEmpty) return null;
+    await _tokenStorage.saveTokens(tokens);
+    final refreshedDeviceId = decoded['deviceId']?.toString();
+    if (refreshedDeviceId != null && refreshedDeviceId.isNotEmpty) {
+      await _tokenStorage.saveDeviceId(refreshedDeviceId);
+    }
+    return tokens;
+  }
+
   Future<String> _getOrCreateDeviceId() async {
     final existing = await _tokenStorage.readDeviceId();
     if (existing != null && existing.isNotEmpty) return existing;

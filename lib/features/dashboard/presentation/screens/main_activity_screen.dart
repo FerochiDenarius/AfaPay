@@ -30,7 +30,7 @@ class _MainActivityScreenState extends ConsumerState<MainActivityScreen> {
 
   void _redirectIfAuthExpired() {
     if (ref.read(dashboardProvider).authExpired) {
-      context.go('/login');
+      context.go('/enter-pin');
     }
   }
 

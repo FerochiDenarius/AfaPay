@@ -369,7 +369,6 @@ class ChatRepository {
     if (response.statusCode == 401 || response.statusCode == 403) {
       final refreshed = await _refreshTokens();
       if (refreshed == null) {
-        await _tokenStorage.clear();
         throw const ChatAuthExpiredException();
       }
       response = await _sendMultipartRequest(
@@ -382,7 +381,6 @@ class ChatRepository {
         type: type,
       );
       if (response.statusCode == 401 || response.statusCode == 403) {
-        await _tokenStorage.clear();
         throw const ChatAuthExpiredException();
       }
     }
@@ -405,7 +403,6 @@ class ChatRepository {
     if (response.statusCode == 401 || response.statusCode == 403) {
       final refreshed = await _refreshTokens();
       if (refreshed == null) {
-        await _tokenStorage.clear();
         throw const ChatAuthExpiredException();
       }
       response = await _sendRequest(
@@ -415,7 +412,6 @@ class ChatRepository {
         body: body,
       );
       if (response.statusCode == 401 || response.statusCode == 403) {
-        await _tokenStorage.clear();
         throw const ChatAuthExpiredException();
       }
     }
